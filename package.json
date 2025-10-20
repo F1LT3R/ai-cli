@@ -1,0 +1,27 @@
+{
+	"name": "ai-cli",
+	"version": "0.1.0",
+	"description": "Minimal CLI to stream ChatGPT responses to stdout and save final output to file.",
+	"type": "module",
+	"bin": {
+		"ai": "./bin/ai.mjs"
+	},
+	"scripts": {
+		"start": "node ./bin/ai.mjs",
+		"link": "npm link"
+	},
+	"keywords": [
+		"chatgpt",
+		"cli",
+		"openai",
+		"streaming",
+		"esm"
+	],
+	"author": "Al",
+	"license": "MIT",
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"dependencies": {},
+	"devDependencies": {}
+}
