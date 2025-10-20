@@ -8,10 +8,31 @@
   "stream_default": true,
   "save_path_default": "ai.out.txt",
   "env_key": "OPENAI_API_KEY",
-  "conversation": [],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "10 + 11",
+      "timestamp": "2025-10-20T18:27:48.503Z"
+    },
+    {
+      "role": "assistant",
+      "content": "10 + 11 equals 21.",
+      "timestamp": "2025-10-20T18:27:48.503Z"
+    },
+    {
+      "role": "user",
+      "content": "How much? What was the number?",
+      "timestamp": "2025-10-20T18:28:14.389Z"
+    },
+    {
+      "role": "assistant",
+      "content": "The sum of 10 and 11 is 21.",
+      "timestamp": "2025-10-20T18:28:14.390Z"
+    }
+  ],
   "meta": {
-    "last_updated": null,
-    "total_turns": 0,
+    "last_updated": "2025-10-20T18:28:14.390Z",
+    "total_turns": 2,
     "notes": "This file is updated by the CLI after each run. Do not check secrets into VCS."
   }
 }

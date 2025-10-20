@@ -5,6 +5,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
+console.log('i3')
 /*
 	Single-file CLI that:
 	- Streams tokens to stdout (primary mode)

@@ -157,7 +157,7 @@ const writeConfigAtomic = async (cfgPath, obj) => {
 const isoNow = () => new Date().toISOString()
 
 const openaiFetch = async ({ apiKey, body, baseUrl }) => {
-	const url = new URL('/chat/completions', baseUrl).toString()
+	const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
 	const res = await fetch(url, {
 		method: 'POST',
 		headers: {
@@ -276,23 +276,14 @@ const main = async () => {
 	try {
 		const opts = parseArgs(process.argv)
 
-		const apiKeyEnv = 'OPENAI_API_KEY'
-		const apiKey = process.env[apiKeyEnv]
-		if (!apiKey) {
-			console.error('Missing OPENAI_API_KEY in environment')
-			process.exit(3)
-			return
-		}
-
-		// Find project root and config path
 		const root = await findProjectRoot(process.cwd())
 		const cfgPath = await ensureConfig(root)
 		let cfg = await readConfig(cfgPath)
 
-		// Allow env_key override (future), but for now honoring cfg.env_key if someone edits it
+		// Respect env key name in config
 		const envKeyName = cfg.env_key || 'OPENAI_API_KEY'
-		const effectiveKey = process.env[envKeyName]
-		if (!effectiveKey) {
+		const apiKey = process.env[envKeyName]
+		if (!apiKey) {
 			console.error(`Missing ${envKeyName} in environment`)
 			process.exit(3)
 			return
@@ -310,15 +301,15 @@ const main = async () => {
 		}
 
 		const { finalText } = await streamCompletion({
-			apiKey: effectiveKey,
+			apiKey,
 			cfg,
 			opts,
 			prompt,
 		})
 
-		// Determine save path
+		// Determine save path (cwd-based), ensure trailing newline
 		const savePath = path.resolve(process.cwd(), opts.savePath ?? cfg.save_path_default)
-		await fs.writeFile(savePath, finalText, 'utf8')
+		await fs.writeFile(savePath, finalText + '\n', 'utf8')
 
 		// Update conversation + meta and write back atomically
 		cfg = await readConfig(cfgPath) // re-read in case another process wrote
