@@ -4,7 +4,7 @@
 	"description": "Minimal CLI to stream ChatGPT responses to stdout and save final output to file.",
 	"type": "module",
 	"bin": {
-		"ai": "./bin/ai-i14.mjs"
+		"ai": "./bin/ai-i15.mjs"
 	},
 	"scripts": {
 		"start": "node ./bin/ai-i5.mjs",

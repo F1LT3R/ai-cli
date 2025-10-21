@@ -7,6 +7,13 @@ import * as readline from 'node:readline/promises'
 import { stdin as rlIn, stderr as rlErr } from 'node:process'
 import { MarkdownRenderer } from '../lib/markdown-renderer-i5.mjs'
 
+const SGR = {
+	reset: '\x1b[0m',
+	yellow: '\x1b[33m',
+	green: '\x1b[32m',
+	cyan: '\x1b[36m',
+}
+
 /*
 	CLI behavior:
 	- Discover project root by walking up from CWD to the nearest folder containing package.json
@@ -286,7 +293,7 @@ const promptSavePath = async ({ proposed }) => {
 
 	try {
 		const abs = path.resolve(process.cwd(), proposed)
-		const answer = await rl.question(`Save as [${abs}]: `)
+		const answer = await rl.question(process.stdout.isTTY ? `${SGR.yellow}Save as ${SGR.yellow}[${SGR.reset}${abs}${SGR.yellow}]${SGR.reset}: ` : `Save as [${abs}]: `)
 		await rl.close()
 		process.removeListener('SIGINT', onSigint)
 		if (aborted) {
@@ -398,8 +405,11 @@ const main = async () => {
 		await fs.writeFile(targetPath, finalText + '\n', 'utf8')
 		await writeConfigAtomic(cfgPath, cfg)
 
-		process.stderr.write(`\n[Saved final output to: ${targetPath}]\n`)
-		process.stderr.write(`[Updated context: ${cfgPath}]\n`)
+		process.stderr.write(`
+${SGR.green}[Saved final output to: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}
+`)
+		process.stderr.write(`${SGR.cyan}[Updated context: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}
+`)
 
 		process.exit(0)
 	} catch (e) {
