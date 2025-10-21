@@ -3,52 +3,38 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { fileURLToPath } from 'node:url'
+import * as readline from 'node:readline/promises'
+import { stdin as rlIn, stderr as rlErr } from 'node:process'
 
-console.log('i3')
 /*
-	Single-file CLI that:
-	- Streams tokens to stdout (primary mode)
-	- Writes the final full result to a file (default: ./ai.out.txt)
-	- Uses OPENAI_API_KEY from the environment
-	- Non-structured output (plain text)
-	- Flags: --save <path>, --model <id>, --system <text>, --no-stream
-	- Prompt is taken from the first positional argument OR from stdin if no positional prompt
+	CLI behavior:
+	- Discover project root by walking up from CWD to the nearest folder containing package.json
+	- Use `./.ai/openai.json` under that root for settings + conversation
+	- Auto-create the JSON file if missing (with sane defaults)
+	- Prepend prior conversation to the next request for continuity
+	- Stream tokens to stdout; then interactive autosave prompt (TTY-aware)
+	- Flags: --model <id>, --system <text>, --no-stream, --raw (future), --debug (future)
+	- Positional prompt OR stdin if none
 */
-
-export const DEFAULTS = {
-	model: 'gpt-4o-mini',
-	savePath: 'ai.out.txt',
-	system: 'You are a helpful assistant.',
-	stream: true,
-}
 
 export const parseArgs = (argv) => {
 	const opts = {
-		model: DEFAULTS.model,
-		savePath: DEFAULTS.savePath,
-		system: DEFAULTS.system,
-		stream: DEFAULTS.stream,
+		model: undefined,
+		system: undefined,
+		stream: true,
 		prompt: undefined,
 	}
 
-	// Skip node and script paths
 	const args = argv.slice(2)
-
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i]
 
-		// First non-flag token is the prompt (keep quotes intact via shell)
+		// First non-flag token becomes the prompt
 		if (!arg.startsWith('--') && opts.prompt === undefined) {
 			opts.prompt = arg
 			continue
 		}
 
-		if (arg === '--save') {
-			opts.savePath = args[i + 1]
-			i += 1
-			continue
-		}
 		if (arg === '--model') {
 			opts.model = args[i + 1]
 			i += 1
@@ -68,7 +54,7 @@ export const parseArgs = (argv) => {
 	return opts
 }
 
-export const readAllStdin = async () => {
+const readAllStdin = async () => {
 	if (process.stdin.isTTY) {
 		return ''
 	}
@@ -79,19 +65,96 @@ export const readAllStdin = async () => {
 	return String(data).trim()
 }
 
-export const buildChatRequestBody = ({ system, prompt, model, stream }) => {
-	return {
-		model,
-		stream,
-		messages: [
-			{ role: 'system', content: system },
-			{ role: 'user', content: prompt },
-		],
+const fileExists = async (p) => {
+	try {
+		await fs.access(p)
+		return true
+	} catch {
+		return false
 	}
 }
 
-const openaiFetch = async ({ apiKey, body }) => {
-	const res = await fetch('https://api.openai.com/v1/chat/completions', {
+const findProjectRoot = async (startDir) => {
+	let dir = path.resolve(startDir)
+	while (true) {
+		const pkg = path.join(dir, 'package.json')
+		if (await fileExists(pkg)) {
+			return dir
+		}
+		const parent = path.dirname(dir)
+		if (parent === dir) {
+			break
+		}
+		dir = parent
+	}
+	// Fallback: use current working directory if no package.json found
+	return path.resolve(startDir)
+}
+
+const defaultConfig = () => ({
+	provider: 'openai',
+	base_url: 'https://api.openai.com/v1',
+	model: 'gpt-4o-mini',
+	system: 'You are a helpful assistant.',
+	temperature: 0.7,
+	max_tokens: 1024,
+	stream_default: true,
+	save_path_default: 'ai.out.txt',
+	env_key: 'OPENAI_API_KEY',
+	conversation: [],
+	meta: {
+		last_updated: null,
+		total_turns: 0,
+		notes: 'This file is updated by the CLI after each run. Do not check secrets into VCS.',
+	},
+})
+
+const ensureConfig = async (rootDir) => {
+	const aiDir = path.join(rootDir, '.ai')
+	const cfgPath = path.join(aiDir, 'openai.json')
+	await fs.mkdir(aiDir, { recursive: true })
+	if (!(await fileExists(cfgPath))) {
+		const cfg = defaultConfig()
+		await fs.writeFile(cfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+	}
+	return cfgPath
+}
+
+const readConfig = async (cfgPath) => {
+	try {
+		const raw = await fs.readFile(cfgPath, 'utf8')
+		const parsed = JSON.parse(raw)
+		// Merge defaults for any missing keys
+		const d = defaultConfig()
+		return {
+			...d,
+			...parsed,
+			meta: { ...d.meta, ...parsed.meta },
+			conversation: Array.isArray(parsed.conversation) ? parsed.conversation : d.conversation,
+		}
+	} catch (e) {
+		// Backup invalid file and recreate
+		try {
+			const bak = cfgPath.replace(/openai\.json$/, `openai.json.bak-${Date.now()}`)
+			await fs.copyFile(cfgPath, bak).catch(() => {})
+		} catch {}
+		const fresh = defaultConfig()
+		await fs.writeFile(cfgPath, JSON.stringify(fresh, null, 2) + '\n', 'utf8')
+		return fresh
+	}
+}
+
+const writeConfigAtomic = async (cfgPath, obj) => {
+	const tmp = cfgPath + '.tmp'
+	await fs.writeFile(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8')
+	await fs.rename(tmp, cfgPath)
+}
+
+const isoNow = () => new Date().toISOString()
+
+const openaiFetch = async ({ apiKey, body, baseUrl }) => {
+	const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
+	const res = await fetch(url, {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/json',
@@ -101,91 +164,177 @@ const openaiFetch = async ({ apiKey, body }) => {
 	})
 	if (!res.ok || !res.body) {
 		const text = await res.text().catch(() => '')
-		throw new Error(
-			`OpenAI API error: ${res.status} ${res.statusText} ${text ? `- ${text}` : ''}`,
-		)
+		throw new Error(`OpenAI API error: ${res.status} ${res.statusText} ${text ? `- ${text}` : ''}`)
 	}
 	return res
 }
 
-/*
-	parseSseAndAccumulate
-	- Accepts a string (for tests) or incremental chunks (runtime)
-	- Calls onDelta(text) for each delta
-	- Returns the final concatenated text
-*/
-export const parseSseAndAccumulate = async (bufferOrString, onDelta) => {
-	const text = typeof bufferOrString === 'string'
-		? bufferOrString
-		: new TextDecoder().decode(bufferOrString)
-
+// Robust SSE stream reader with line buffering across chunks
+const streamAndAccumulate = async (readable, onDelta) => {
+	const decoder = new TextDecoder()
+	let buffer = ''
 	let final = ''
-	const lines = text.split(/\r?\n/)
 
-	for (const line of lines) {
-		const trimmed = line.trim()
-		if (!trimmed.startsWith('data:')) {
-			continue
-		}
-		const payload = trimmed.slice(5).trim()
-		if (!payload || payload === '[DONE]') {
-			continue
-		}
-		try {
-			const json = JSON.parse(payload)
-			const delta = json?.choices?.[0]?.delta ?? {}
-			const piece = typeof delta?.content === 'string' ? delta.content : ''
-			if (piece) {
-				onDelta(piece)
-				final += piece
+	for await (const chunk of readable) {
+		buffer += decoder.decode(chunk, { stream: true })
+		let idx
+		while ((idx = buffer.indexOf('\n')) !== -1) {
+			const line = buffer.slice(0, idx)
+			buffer = buffer.slice(idx + 1)
+			const trimmed = line.trim()
+			if (!trimmed.startsWith('data:')) {
+				continue
 			}
-		} catch {
-			// ignore malformed lines
+			const payload = trimmed.slice(5).trim()
+			if (!payload || payload === '[DONE]') {
+				continue
+			}
+			try {
+				const json = JSON.parse(payload)
+				const delta = json?.choices?.[0]?.delta ?? {}
+				const piece = typeof delta?.content === 'string' ? delta.content : ''
+				if (piece) {
+					onDelta(piece)
+					final += piece
+				}
+			} catch {}
+		}
+	}
+
+	// Process any remaining buffered line
+	const rest = buffer.trim()
+	if (rest.startsWith('data:')) {
+		const payload = rest.slice(5).trim()
+		if (payload && payload !== '[DONE]') {
+			try {
+				const json = JSON.parse(payload)
+				const delta = json?.choices?.[0]?.delta ?? {}
+				const piece = typeof delta?.content === 'string' ? delta.content : ''
+				if (piece) {
+					onDelta(piece)
+					final += piece
+				}
+			} catch {}
 		}
 	}
 
 	return final
 }
 
-const streamCompletion = async ({ apiKey, body, savePath }) => {
-	const res = await openaiFetch({ apiKey, body })
-
-	// Accumulate full response to write to file at the end
-	let finalText = ''
-	const decoder = new TextDecoder()
-
-	if (body.stream) {
-		for await (const chunk of res.body) {
-			const text = decoder.decode(chunk, { stream: true })
-			const deltaText = await parseSseAndAccumulate(text, (piece) => {
-				process.stdout.write(piece)
-			})
-			if (deltaText) {
-				finalText += deltaText
+const buildMessages = ({ system, conversation, prompt }) => {
+	const msgs = []
+	if (system) {
+		msgs.push({ role: 'system', content: system })
+	}
+	if (Array.isArray(conversation)) {
+		for (const m of conversation) {
+			if (m && typeof m.role === 'string' && typeof m.content === 'string') {
+				msgs.push({ role: m.role, content: m.content })
 			}
 		}
+	}
+	msgs.push({ role: 'user', content: prompt })
+	return msgs
+}
+
+const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
+	const body = {
+		model: opts.model ?? cfg.model,
+		stream: opts.stream ?? cfg.stream_default,
+		temperature: cfg.temperature,
+		max_tokens: cfg.max_tokens,
+		messages: buildMessages({
+			system: opts.system ?? cfg.system,
+			conversation: cfg.conversation,
+			prompt,
+		}),
+	}
+
+	const res = await openaiFetch({ apiKey, body, baseUrl: cfg.base_url })
+
+	let finalText = ''
+	if (body.stream) {
+		finalText = await streamAndAccumulate(res.body, (piece) => {
+			process.stdout.write(piece)
+		})
 		process.stdout.write('\n')
 	} else {
-		// Non-streaming fallback: parse once
 		const json = await res.json()
 		const content = json?.choices?.[0]?.message?.content ?? ''
 		process.stdout.write(content + '\n')
 		finalText = content
 	}
 
-	// Write final concatenated output to file
-	const outPath = path.resolve(process.cwd(), savePath)
-	await fs.writeFile(outPath, finalText, 'utf8')
-	return { finalText, outPath }
+	return { finalText }
+}
+
+const promptSavePath = async ({ proposed }) => {
+	// Only prompt if both stdout and stdin are TTY (interactive shell)
+	if (!(process.stdout.isTTY && process.stdin.isTTY)) {
+		return proposed
+	}
+
+	const rl = readline.createInterface({ input: rlIn, output: rlErr })
+	let aborted = false
+	const onSigint = () => {
+		aborted = true
+		try { rl.close() } catch {}
+	}
+	process.once('SIGINT', onSigint)
+
+	try {
+		const abs = path.resolve(process.cwd(), proposed)
+		const answer = await rl.question(`Save as [${abs}]: `)
+		await rl.close()
+		process.removeListener('SIGINT', onSigint)
+		if (aborted) {
+			return null
+		}
+		return answer && answer.trim().length > 0 ? answer.trim() : proposed
+	} catch {
+		try { await rl.close() } catch {}
+		process.removeListener('SIGINT', onSigint)
+		return null
+	}
+}
+
+const ensureParentDir = async (targetPath) => {
+	const dir = path.dirname(targetPath)
+	await fs.mkdir(dir, { recursive: true })
+}
+
+const confirmOverwriteIfExists = async (targetPath) => {
+	if (!(await fileExists(targetPath))) {
+		return true
+	}
+	// Only prompt on TTY; otherwise do not overwrite by default
+	if (!(process.stdout.isTTY && process.stdin.isTTY)) {
+		return false
+	}
+	const rl = readline.createInterface({ input: rlIn, output: rlErr })
+	let ok = false
+	try {
+		const ans = await rl.question('File exists. Overwrite? (y/N): ')
+		ok = String(ans).trim().toLowerCase() === 'y'
+	} finally {
+		try { await rl.close() } catch {}
+	}
+	return ok
 }
 
 const main = async () => {
 	try {
 		const opts = parseArgs(process.argv)
 
-		const apiKey = process.env.OPENAI_API_KEY
+		const root = await findProjectRoot(process.cwd())
+		const cfgPath = await ensureConfig(root)
+		let cfg = await readConfig(cfgPath)
+
+		// Respect env key name in config
+		const envKeyName = cfg.env_key || 'OPENAI_API_KEY'
+		const apiKey = process.env[envKeyName]
 		if (!apiKey) {
-			console.error('Missing OPENAI_API_KEY in environment')
+			console.error(`Missing ${envKeyName} in environment`)
 			process.exit(3)
 			return
 		}
@@ -196,30 +345,64 @@ const main = async () => {
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt text>" [--save file] [--model id] [--system text]')
+			console.error('Usage: ai "<prompt text>" [--model id] [--system text] [--no-stream]')
 			process.exit(1)
 			return
 		}
 
-		const body = buildChatRequestBody({
-			system: opts.system,
-			prompt,
-			model: opts.model,
-			stream: opts.stream,
-		})
-
-		const { outPath } = await streamCompletion({
+		const { finalText } = await streamCompletion({
 			apiKey,
-			body,
-			savePath: opts.savePath,
+			cfg,
+			opts,
+			prompt,
 		})
 
-		// Write a brief note to stderr so it doesn't pollute stdout pipelines
-		process.stderr.write(`\n[Saved final output to: ${outPath}]\n`)
+		// Update conversation + meta before computing default filename (turn = total_turns + 1)
+		cfg = await readConfig(cfgPath) // re-read in case another process wrote
+		cfg.conversation = Array.isArray(cfg.conversation) ? cfg.conversation : []
+		cfg.conversation.push({ role: 'user', content: prompt, timestamp: isoNow() })
+		cfg.conversation.push({ role: 'assistant', content: finalText, timestamp: isoNow() })
+		cfg.meta = cfg.meta || {}
+		const nextTurn = Number(cfg.meta.total_turns || 0) + 1
+		cfg.meta.total_turns = nextTurn
+		cfg.meta.last_updated = isoNow()
+		await writeConfigAtomic(cfgPath, cfg)
+
+		// Determine default filename and prompt user for save path (TTY-aware)
+		const defaultName = `conv-${nextTurn}.md`
+		let chosen = await promptSavePath({ proposed: defaultName })
+
+		// If Ctrl-C or null → abort saving but keep streamed output
+		if (chosen === null) {
+			process.stderr.write('[Save canceled]\n')
+			process.stderr.write(`[Updated context: ${cfgPath}]\n`)
+			process.exit(0)
+			return
+		}
+
+		// Resolve to absolute path from CWD and create parents
+		const targetPath = path.resolve(process.cwd(), chosen)
+		await ensureParentDir(targetPath)
+
+		// If exists, confirm overwrite
+		if (!(await confirmOverwriteIfExists(targetPath))) {
+			process.stderr.write('[Not saved: file exists]\n')
+			process.stderr.write(`[Updated context: ${cfgPath}]\n`)
+			process.exit(0)
+			return
+		}
+
+		// Write final text with newline
+		await fs.writeFile(targetPath, finalText + '\n', 'utf8')
+
+		process.stderr.write(`\n[Saved final output to: ${targetPath}]\n`)
+		process.stderr.write(`[Updated context: ${cfgPath}]\n`)
+
 		process.exit(0)
 	} catch (e) {
 		console.error(e)
 		process.exit(3)
 	}
 }
+
 await main()
