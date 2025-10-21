@@ -5,7 +5,7 @@ import path from 'node:path'
 import process from 'node:process'
 import * as readline from 'node:readline/promises'
 import { stdin as rlIn, stderr as rlErr } from 'node:process'
-import { MarkdownRenderer } from '../lib/markdown-renderer.mjs'
+import { MarkdownRenderer } from '../lib/markdown-renderer-i1.mjs'
 
 /*
 	CLI behavior:
