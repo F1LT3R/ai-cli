@@ -5,7 +5,6 @@ import path from 'node:path'
 import process from 'node:process'
 import * as readline from 'node:readline/promises'
 import { stdin as rlIn, stderr as rlErr } from 'node:process'
-import { MarkdownRenderer } from '../lib/markdown-renderer-i3.mjs'
 
 /*
 	CLI behavior:
@@ -255,11 +254,10 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
 
 	let finalText = ''
 	if (body.stream) {
-		const renderer = new MarkdownRenderer({ tty: process.stdout.isTTY })
 		finalText = await streamAndAccumulate(res.body, (piece) => {
-			process.stdout.write(renderer.push(piece))
+			process.stdout.write(piece)
 		})
-		process.stdout.write(renderer.flush() + '\n')
+		process.stdout.write('\n')
 	} else {
 		const json = await res.json()
 		const content = json?.choices?.[0]?.message?.content ?? ''
