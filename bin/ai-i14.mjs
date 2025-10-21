@@ -368,7 +368,7 @@ const main = async () => {
 		const nextTurn = Number(cfg.meta.total_turns || 0) + 1
 		cfg.meta.total_turns = nextTurn
 		cfg.meta.last_updated = isoNow()
-		await writeConfigAtomic(cfgPath, cfg)
+		// await writeConfigAtomic(cfgPath, cfg)
 
 		// Determine default filename and prompt user for save path (TTY-aware)
 		const defaultName = `conv-${nextTurn}.md`
@@ -377,7 +377,7 @@ const main = async () => {
 		// If Ctrl-C or null → abort saving but keep streamed output
 		if (chosen === null) {
 			process.stderr.write('[Save canceled]\n')
-			process.stderr.write(`[Updated context: ${cfgPath}]\n`)
+			process.stderr.write(`[Context not written: ${cfgPath}]\n`)
 			process.exit(0)
 			return
 		}
@@ -389,13 +389,14 @@ const main = async () => {
 		// If exists, confirm overwrite
 		if (!(await confirmOverwriteIfExists(targetPath))) {
 			process.stderr.write('[Not saved: file exists]\n')
-			process.stderr.write(`[Updated context: ${cfgPath}]\n`)
+			process.stderr.write(`[Context not written: ${cfgPath}]\n`)
 			process.exit(0)
 			return
 		}
 
 		// Write final text with newline
 		await fs.writeFile(targetPath, finalText + '\n', 'utf8')
+		await writeConfigAtomic(cfgPath, cfg)
 
 		process.stderr.write(`\n[Saved final output to: ${targetPath}]\n`)
 		process.stderr.write(`[Updated context: ${cfgPath}]\n`)
