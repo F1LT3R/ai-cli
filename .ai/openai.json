@@ -28,11 +28,71 @@
       "role": "assistant",
       "content": "The sum of 10 and 11 is 21.",
       "timestamp": "2025-10-20T18:28:14.390Z"
+    },
+    {
+      "role": "user",
+      "content": "Node.js HTTP server example. ESM latest.",
+      "timestamp": "2025-10-21T13:27:33.720Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Certainly! Below is an example of a simple HTTP server using Node.js with ECMAScript Modules (ESM) syntax. This example is compatible with the latest versions of Node.js that support ESM.\n\n### Setting Up Your Project\n\n1. **Create a new directory for your project**:\n\n   ```bash\n   mkdir my-node-esm-server\n   cd my-node-esm-server\n   ```\n\n2. **Initialize a new Node.js project**:\n\n   ```bash\n   npm init -y\n   ```\n\n3. **Create a file named `server.mjs`**:\n\n   ```bash\n   touch server.mjs\n   ```\n\n4. **Edit `package.json`** to specify that you are using ESM. You can add `\"type\": \"module\"` to your `package.json` file:\n\n   ```json\n   {\n     \"name\": \"my-node-esm-server\",\n     \"version\": \"1.0.0\",\n     \"main\": \"server.mjs\",\n     \"type\": \"module\",\n     \"scripts\": {\n       \"start\": \"node server.mjs\"\n     },\n     \"dependencies\": {},\n     \"devDependencies\": {}\n   }\n   ```\n\n### Writing the HTTP Server\n\nNow, open `server.mjs` in your favorite text editor and add the following code:\n\n```javascript\nimport http from 'http';\n\nconst hostname = '127.0.0.1';\nconst port = 3000;\n\nconst server = http.createServer((req, res) => {\n  res.statusCode = 200; // HTTP status code 200 (OK)\n  res.setHeader('Content-Type', 'text/plain'); // Set content type\n  res.end('Hello, World!\\n'); // Send response\n});\n\nserver.listen(port, hostname, () => {\n  console.log(`Server running at http://${hostname}:${port}/`);\n});\n```\n\n### Running the Server\n\nTo run your server, use the following command in your terminal:\n\n```bash\nnpm start\n```\n\n### Accessing the Server\n\nOnce the server is running, you can access it by opening a web browser and navigating to:\n\n```\nhttp://127.0.0.1:3000/\n```\n\nYou should see the message \"Hello, World!\" displayed in your browser.\n\n### Summary\n\nThis example demonstrates how to create a simple HTTP server using Node.js with ESM syntax. You can expand upon this basic server by adding routing, middleware, or serving static files as needed.",
+      "timestamp": "2025-10-21T13:27:33.724Z"
+    },
+    {
+      "role": "user",
+      "content": "Node.js HTTP server example. ESM latest. Code only.",
+      "timestamp": "2025-10-21T13:28:13.045Z"
+    },
+    {
+      "role": "assistant",
+      "content": "```javascript\nimport http from 'http';\n\nconst hostname = '127.0.0.1';\nconst port = 3000;\n\nconst server = http.createServer((req, res) => {\n  res.statusCode = 200;\n  res.setHeader('Content-Type', 'text/plain');\n  res.end('Hello, World!\\n');\n});\n\nserver.listen(port, hostname, () => {\n  console.log(`Server running at http://${hostname}:${port}/`);\n});\n```",
+      "timestamp": "2025-10-21T13:28:13.046Z"
+    },
+    {
+      "role": "user",
+      "content": "Node.js HTTP server example. ESM latest. Code only.",
+      "timestamp": "2025-10-21T13:29:30.290Z"
+    },
+    {
+      "role": "assistant",
+      "content": "```javascript\nimport http from 'http';\n\nconst hostname = '127.0.0.1';\nconst port = 3000;\n\nconst server = http.createServer((req, res) => {\n  res.statusCode = 200;\n  res.setHeader('Content-Type', 'text/plain');\n  res.end('Hello, World!\\n');\n});\n\nserver.listen(port, hostname, () => {\n  console.log(`Server running at http://${hostname}:${port}/`);\n});\n```",
+      "timestamp": "2025-10-21T13:29:30.291Z"
+    },
+    {
+      "role": "user",
+      "content": "Add MIME types to the server, code only, no backticks.",
+      "timestamp": "2025-10-21T13:30:53.161Z"
+    },
+    {
+      "role": "assistant",
+      "content": "import http from 'http';\nimport { extname } from 'path';\nimport fs from 'fs';\n\nconst hostname = '127.0.0.1';\nconst port = 3000;\n\nconst mimeTypes = {\n  '.html': 'text/html',\n  '.js': 'application/javascript',\n  '.css': 'text/css',\n  '.json': 'application/json',\n  '.png': 'image/png',\n  '.jpg': 'image/jpeg',\n  '.gif': 'image/gif',\n  '.svg': 'image/svg+xml',\n  '.txt': 'text/plain',\n  '.woff': 'font/woff',\n  '.woff2': 'font/woff2',\n};\n\nconst server = http.createServer((req, res) => {\n  const filePath = '.' + req.url;\n  const ext = extname(filePath);\n  const contentType = mimeTypes[ext] || 'application/octet-stream';\n\n  fs.readFile(filePath, (err, content) => {\n    if (err) {\n      res.writeHead(404, { 'Content-Type': 'text/plain' });\n      res.end('404 Not Found\\n');\n    } else {\n      res.writeHead(200, { 'Content-Type': contentType });\n      res.end(content);\n    }\n  });\n});\n\nserver.listen(port, hostname, () => {\n  console.log(`Server running at http://${hostname}:${port}/`);\n});",
+      "timestamp": "2025-10-21T13:30:53.162Z"
+    },
+    {
+      "role": "user",
+      "content": "Add MIME types for video media.",
+      "timestamp": "2025-10-21T13:33:40.082Z"
+    },
+    {
+      "role": "assistant",
+      "content": "import http from 'http';\nimport { extname } from 'path';\nimport fs from 'fs';\n\nconst hostname = '127.0.0.1';\nconst port = 3000;\n\nconst mimeTypes = {\n  '.html': 'text/html',\n  '.js': 'application/javascript',\n  '.css': 'text/css',\n  '.json': 'application/json',\n  '.png': 'image/png',\n  '.jpg': 'image/jpeg',\n  '.gif': 'image/gif',\n  '.svg': 'image/svg+xml',\n  '.txt': 'text/plain',\n  '.woff': 'font/woff',\n  '.woff2': 'font/woff2',\n  '.mp4': 'video/mp4',\n  '.webm': 'video/webm',\n  '.ogg': 'video/ogg',\n  '.mov': 'video/quicktime',\n  '.avi': 'video/x-msvideo',\n  '.mkv': 'video/x-matroska',\n};\n\nconst server = http.createServer((req, res) => {\n  const filePath = '.' + req.url;\n  const ext = extname(filePath);\n  const contentType = mimeTypes[ext] || 'application/octet-stream';\n\n  fs.readFile(filePath, (err, content) => {\n    if (err) {\n      res.writeHead(404, { 'Content-Type': 'text/plain' });\n      res.end('404 Not Found\\n');\n    } else {\n      res.writeHead(200, { 'Content-Type': contentType });\n      res.end(content);\n    }\n  });\n});\n\nserver.listen(port, hostname, () => {\n  console.log(`Server running at http://${hostname}:${port}/`);\n});",
+      "timestamp": "2025-10-21T13:33:40.083Z"
+    },
+    {
+      "role": "user",
+      "content": "Serve 404 response from local file: 404.html.",
+      "timestamp": "2025-10-21T13:39:24.792Z"
+    },
+    {
+      "role": "assistant",
+      "content": "import http from 'http';\nimport { extname } from 'path';\nimport fs from 'fs';\n\nconst hostname = '127.0.0.1';\nconst port = 3000;\n\nconst mimeTypes = {\n  '.html': 'text/html',\n  '.js': 'application/javascript',\n  '.css': 'text/css',\n  '.json': 'application/json',\n  '.png': 'image/png',\n  '.jpg': 'image/jpeg',\n  '.gif': 'image/gif',\n  '.svg': 'image/svg+xml',\n  '.txt': 'text/plain',\n  '.woff': 'font/woff',\n  '.woff2': 'font/woff2',\n  '.mp4': 'video/mp4',\n  '.webm': 'video/webm',\n  '.ogg': 'video/ogg',\n  '.mov': 'video/quicktime',\n  '.avi': 'video/x-msvideo',\n  '.mkv': 'video/x-matroska',\n};\n\nconst server = http.createServer((req, res) => {\n  const filePath = '.' + req.url;\n  const ext = extname(filePath);\n  const contentType = mimeTypes[ext] || 'application/octet-stream';\n\n  fs.readFile(filePath, (err, content) => {\n    if (err) {\n      // Serve the 404.html file on error\n      fs.readFile('404.html', (err404, content404) => {\n        if (err404) {\n          res.writeHead(500, { 'Content-Type': 'text/plain' });\n          res.end('500 Internal Server Error\\n');\n        } else {\n          res.writeHead(404, { 'Content-Type': 'text/html' });\n          res.end(content404);\n        }\n      });\n    } else {\n      res.writeHead(200, { 'Content-Type': contentType });\n      res.end(content);\n    }\n  });\n});\n\nserver.listen(port, hostname, () => {\n  console.log(`Server running at http://${hostname}:${port}/`);\n});",
+      "timestamp": "2025-10-21T13:39:24.793Z"
     }
   ],
   "meta": {
-    "last_updated": "2025-10-20T18:28:14.390Z",
-    "total_turns": 2,
+    "last_updated": "2025-10-21T13:39:24.793Z",
+    "total_turns": 8,
     "notes": "This file is updated by the CLI after each run. Do not check secrets into VCS."
   }
 }
