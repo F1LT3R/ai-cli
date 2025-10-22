@@ -388,11 +388,33 @@
       "role": "assistant",
       "content": "{\n  \"len\": 4\n}",
       "timestamp": "2025-10-22T17:47:20.980Z"
+    },
+    {
+      "role": "user",
+      "content": "Return ONLY {\"test\":1}",
+      "timestamp": "2025-10-22T18:46:51.507Z"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"test\":1}",
+      "timestamp": "2025-10-22T18:46:51.509Z"
+    },
+    {
+      "role": "user",
+      "content": "Return ONLY {\"ok\":true}",
+      "timestamp": "2025-10-22T18:58:28.003Z"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"ok\":true}",
+      "timestamp": "2025-10-22T18:58:28.004Z"
     }
   ],
   "meta": {
-    "last_updated": "2025-10-22T17:47:20.980Z",
-    "total_turns": 38,
-    "notes": "This file is updated by the CLI after each run. Do not check secrets into VCS."
-  }
+    "last_updated": "2025-10-22T18:58:28.004Z",
+    "total_turns": 40,
+    "notes": "This file is updated by the CLI after each run. Do not check secrets into VCS.",
+    "last_format": "json"
+  },
+  "format": "json"
 }

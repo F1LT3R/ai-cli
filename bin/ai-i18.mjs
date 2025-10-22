@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// This is iteration 18 of bin/ai-i17.mjs (use cfg.format for shaping; fixed fetch body key)
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -265,7 +266,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
 
 	const res = await openaiFetch({
 		apiKey,
-		body: shapeRequestBody({ format: __normalized.format, body }),
+		body: shapeRequestBody({ format: cfg.format, body }),
 		baseUrl: cfg.base_url,
 	})
 

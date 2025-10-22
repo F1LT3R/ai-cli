@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// This is iteration 19 of bin/ai-i18.mjs (cfg.format defaultName; IIFE footer)
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -265,7 +266,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
 
 	const res = await openaiFetch({
 		apiKey,
-		body: shapeRequestBody({ format: __normalized.format, body }),
+		body: shapeRequestBody({ format: cfg.format, body }),
 		baseUrl: cfg.base_url,
 	})
 
@@ -392,7 +393,7 @@ const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
 
 		// Validate JSON in json format
 		let validatedText = finalText
-		if (__normalized.format === 'json') {
+		if (cfg.format === 'json') {
 			try {
 				const parsed = JSON.parse(finalText)
 				validatedText = JSON.stringify(parsed, null, 2)
@@ -414,7 +415,7 @@ const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
 		// await writeConfigAtomic(cfgPath, cfg)
 
 		// Determine default filename and prompt user for save path (TTY-aware)
-		const defaultName = __normalized.format === 'json' ? `conv-${nextTurn}.json` : `conv-${nextTurn}.md`
+		const defaultName = (cfg.format === 'json') ? `conv-${nextTurn}.json` : `conv-${nextTurn}.md`
 		let chosen = await promptSavePath({ proposed: defaultName })
 
 		// If Ctrl-C or null → abort saving but keep streamed output

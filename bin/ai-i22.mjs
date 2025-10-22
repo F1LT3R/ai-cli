@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// This is iteration 22 of bin/ai-i21.mjs (pass effectiveFormat into streamCompletion)
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -6,7 +7,7 @@ import process from 'node:process'
 import * as readline from 'node:readline/promises'
 import { stdin as rlIn, stderr as rlErr } from 'node:process'
 import { MarkdownRenderer } from '../lib/markdown-renderer-i5.mjs'
-import { parseOptions } from '../lib/options-i2.mjs'
+import { parseOptions } from '../lib/options-i3.mjs'
 import { shapeRequestBody } from '../lib/response-shape-i2.mjs'
 
 const SGR = {
@@ -250,7 +251,7 @@ const buildMessages = ({ system, conversation, prompt }) => {
 	return msgs
 }
 
-const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
+const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) => {
 	const body = {
 		model: opts.model ?? cfg.model,
 		stream: opts.stream ?? cfg.stream_default,
@@ -265,7 +266,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
 
 	const res = await openaiFetch({
 		apiKey,
-		body: shapeRequestBody({ format: __normalized.format, body }),
+		body: shapeRequestBody({ format: effectiveFormat, body }),
 		baseUrl: cfg.base_url,
 	})
 
@@ -341,8 +342,9 @@ const confirmOverwriteIfExists = async (targetPath) => {
 }
 
 const main = async () => {
-// Normalize high-level options (format/model) with our helper
-const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
+	// Normalize high-level options (format/model) with our helper
+	const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
+
 	try {
 		const opts = parseArgs(process.argv)
 
@@ -382,17 +384,23 @@ const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
 			cfg.format = __normalized.format
 			await writeConfigAtomic(cfgPath, cfg)
 		}
+
+		const effectiveFormat = (typeof cfg?.format === 'string' && cfg.format) || (typeof cfg?.meta?.last_format === 'string' && cfg.meta.last_format) || 'text'
+
+		console.log({effectiveFormat})
+		console.log({'cfg.format': cfg.format})
+		console.log({'cfg.meta.last_format': cfg.meta.last_format})
+
 		const { finalText } = await streamCompletion({
 			apiKey,
 			cfg,
 			opts,
 			prompt,
-		})
-
+		}, effectiveFormat)
 
 		// Validate JSON in json format
 		let validatedText = finalText
-		if (__normalized.format === 'json') {
+		if (effectiveFormat === 'json') {
 			try {
 				const parsed = JSON.parse(finalText)
 				validatedText = JSON.stringify(parsed, null, 2)
@@ -414,7 +422,7 @@ const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
 		// await writeConfigAtomic(cfgPath, cfg)
 
 		// Determine default filename and prompt user for save path (TTY-aware)
-		const defaultName = __normalized.format === 'json' ? `conv-${nextTurn}.json` : `conv-${nextTurn}.md`
+		const defaultName = (effectiveFormat === 'json') ? `conv-${nextTurn}.json` : `conv-${nextTurn}.md`
 		let chosen = await promptSavePath({ proposed: defaultName })
 
 		// If Ctrl-C or null → abort saving but keep streamed output
@@ -442,12 +450,14 @@ const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
 		await writeConfigAtomic(cfgPath, cfg)
 
 		process.stderr.write(`
-${SGR.green}[Saved final output to: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}
-`)
-		process.stderr.write(`${SGR.cyan}[Updated context: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}
-`)
+			${SGR.green}[Saved final output to: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}
+		`)
 
-			console.log()
+		process.stderr.write(
+			`${SGR.cyan}[Updated context: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}
+		`)
+
+		console.log()
 		process.exit(0)
 	} catch (e) {
 		console.error(e)
@@ -455,4 +465,11 @@ ${SGR.green}[Saved final output to: ${SGR.reset}${targetPath}${SGR.green}]${SGR.
 	}
 }
 
-await main()
+;(async () => {
+	try {
+		await main()
+	} catch (err) {
+		console.error(err?.stack || err)
+		process.exitCode = 1
+	}
+})()
