@@ -12,6 +12,9 @@ const SGR = {
 	yellow: '\x1b[33m',
 	green: '\x1b[32m',
 	cyan: '\x1b[36m',
+	red: '\x1b[31m',
+	magenta: '\x1b[35m',
+	bold: '\x1b[1m',
 }
 
 /*
@@ -266,7 +269,9 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }) => {
 		finalText = await streamAndAccumulate(res.body, (piece) => {
 			process.stdout.write(renderer.push(piece))
 		})
-		process.stdout.write(renderer.flush() + '\n')
+		
+		console.log(`\n${SGR.bold}${SGR.cyan}Response:${SGR.reset}\n`)
+		process.stdout.write(renderer.flush() + '\n\n')
 	} else {
 		const json = await res.json()
 		const content = json?.choices?.[0]?.message?.content ?? ''
@@ -383,8 +388,8 @@ const main = async () => {
 
 		// If Ctrl-C or null → abort saving but keep streamed output
 		if (chosen === null) {
-			process.stderr.write('[Save canceled]\n')
-			process.stderr.write(`[Context not written: ${cfgPath}]\n`)
+			process.stderr.write(`${SGR.red}[Save canceled]${SGR.reset}\n`)
+			process.stderr.write(`${SGR.magenta}[Context not written: ${SGR.reset}${cfgPath}${SGR.magenta}]${SGR.reset}\n`)
 			process.exit(0)
 			return
 		}
@@ -395,8 +400,8 @@ const main = async () => {
 
 		// If exists, confirm overwrite
 		if (!(await confirmOverwriteIfExists(targetPath))) {
-			process.stderr.write('[Not saved: file exists]\n')
-			process.stderr.write(`[Context not written: ${cfgPath}]\n`)
+			process.stderr.write(`${SGR.red}[Not saved: file exists]${SGR.reset}\n`)
+			process.stderr.write(`${SGR.magenta}[Context not written: ${SGR.reset}${cfgPath}${SGR.magenta}]${SGR.reset}\n`)
 			process.exit(0)
 			return
 		}
@@ -411,6 +416,7 @@ ${SGR.green}[Saved final output to: ${SGR.reset}${targetPath}${SGR.green}]${SGR.
 		process.stderr.write(`${SGR.cyan}[Updated context: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}
 `)
 
+			console.log()
 		process.exit(0)
 	} catch (e) {
 		console.error(e)
