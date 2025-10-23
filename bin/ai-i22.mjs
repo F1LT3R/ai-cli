@@ -387,9 +387,9 @@ const main = async () => {
 
 		const effectiveFormat = (typeof cfg?.format === 'string' && cfg.format) || (typeof cfg?.meta?.last_format === 'string' && cfg.meta.last_format) || 'text'
 
-		console.log({effectiveFormat})
-		console.log({'cfg.format': cfg.format})
-		console.log({'cfg.meta.last_format': cfg.meta.last_format})
+		// console.log({effectiveFormat})
+		// console.log({'cfg.format': cfg.format})
+		// console.log({'cfg.meta.last_format': cfg.meta.last_format})
 
 		const { finalText } = await streamCompletion({
 			apiKey,
