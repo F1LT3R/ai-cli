@@ -269,6 +269,8 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) 
 		body: shapeRequestBody({ format: effectiveFormat, body }),
 		baseUrl: cfg.base_url,
 	})
+	
+	console.log(`\n${SGR.bold}${SGR.cyan}Response:${SGR.reset}\n`)
 
 	let finalText = ''
 	if (body.stream) {
@@ -277,7 +279,6 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) 
 			process.stdout.write(renderer.push(piece))
 		})
 		
-		console.log(`\n${SGR.bold}${SGR.cyan}Response:${SGR.reset}\n`)
 		process.stdout.write(renderer.flush() + '\n\n')
 	} else {
 		const json = await res.json()
