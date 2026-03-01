@@ -9,6 +9,18 @@ import { stdin as rlIn, stderr as rlErr } from 'node:process'
 import { MarkdownRenderer } from '../lib/markdown-renderer.mjs'
 import { parseOptions } from '../lib/options.mjs'
 import { shapeRequestBody } from '../lib/response-shape.mjs'
+import {
+	ensurePricingCache,
+	readPricingCache,
+	isCacheStale,
+	lookupPricing,
+	formatCostPerMillion,
+	formatContextSize,
+	calculateCost,
+	contextIndicator,
+	formatUsageLine,
+	formatCost,
+} from '../lib/pricing.mjs'
 
 const SGR = {
 	reset: '\x1b[0m',
@@ -34,7 +46,6 @@ const MODELS = [
 	{ alias: 'llama8b', id: 'meta-llama/llama-3.1-8b-instruct', description: 'Meta Llama 3.1 8B (tiny)' },
 	{ alias: 'qwen7b', id: 'qwen/qwen-2.5-7b-instruct', description: 'Qwen 2.5 7B (tiny)' },
 	{ alias: 'qwenvl', id: 'qwen/qwen-2.5-vl-7b-instruct', description: 'Qwen 2.5 VL 7B (vision, charts)' },
-	{ alias: 'phi', id: 'microsoft/phi-3.5-mini-128k-instruct', description: 'Microsoft Phi 3.5 Mini (tiny)' },
 	{ alias: 'mistral', id: 'mistralai/mistral-small-3.2-24b-instruct-2506', description: 'Mistral Small 3.2' },
 	{ alias: 'deepseek', id: 'deepseek/deepseek-v3.2-20251201', description: 'DeepSeek V3.2' },
 	{ alias: 'kimi', id: 'moonshotai/kimi-k2.5', description: 'Moonshot Kimi K2.5' },
@@ -78,6 +89,7 @@ export const parseArgs = (argv) => {
 		maxTokens: false,
 		debug: false,
 		init: false,
+		updatePricing: false,
 	}
 
 	const args = argv.slice(2)
@@ -130,6 +142,10 @@ export const parseArgs = (argv) => {
 		}
 		if (arg === '--init') {
 			opts.init = true
+			continue
+		}
+		if (arg === '--update-pricing') {
+			opts.updatePricing = true
 			continue
 		}
 	}
@@ -454,6 +470,21 @@ const streamAndAccumulate = async (readable, onDelta) => {
 	const decoder = new TextDecoder()
 	let buffer = ''
 	let final = ''
+	let usage = null
+
+	const processPayload = (payload) => {
+		if (!payload || payload === '[DONE]') return
+		try {
+			const json = JSON.parse(payload)
+			const delta = json?.choices?.[0]?.delta ?? {}
+			const piece = typeof delta?.content === 'string' ? delta.content : ''
+			if (piece) {
+				onDelta(piece)
+				final += piece
+			}
+			if (json.usage) usage = json.usage
+		} catch {}
+	}
 
 	for await (const chunk of readable) {
 		buffer += decoder.decode(chunk, { stream: true })
@@ -462,43 +493,18 @@ const streamAndAccumulate = async (readable, onDelta) => {
 			const line = buffer.slice(0, idx)
 			buffer = buffer.slice(idx + 1)
 			const trimmed = line.trim()
-			if (!trimmed.startsWith('data:')) {
-				continue
-			}
-			const payload = trimmed.slice(5).trim()
-			if (!payload || payload === '[DONE]') {
-				continue
-			}
-			try {
-				const json = JSON.parse(payload)
-				const delta = json?.choices?.[0]?.delta ?? {}
-				const piece = typeof delta?.content === 'string' ? delta.content : ''
-				if (piece) {
-					onDelta(piece)
-					final += piece
-				}
-			} catch {}
+			if (!trimmed.startsWith('data:')) continue
+			processPayload(trimmed.slice(5).trim())
 		}
 	}
 
 	// Process any remaining buffered line
 	const rest = buffer.trim()
 	if (rest.startsWith('data:')) {
-		const payload = rest.slice(5).trim()
-		if (payload && payload !== '[DONE]') {
-			try {
-				const json = JSON.parse(payload)
-				const delta = json?.choices?.[0]?.delta ?? {}
-				const piece = typeof delta?.content === 'string' ? delta.content : ''
-				if (piece) {
-					onDelta(piece)
-					final += piece
-				}
-			} catch {}
-		}
+		processPayload(rest.slice(5).trim())
 	}
 
-	return final
+	return { text: final, usage }
 }
 
 const buildMessages = async ({ system, conversation, prompt, attachments }) => {
@@ -567,11 +573,14 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effe
 
 	let finalText = ''
 	let images = []
+	let usage = null
 	if (body.stream) {
 		const renderer = new MarkdownRenderer({ tty: process.stdout.isTTY })
-		finalText = await streamAndAccumulate(res.body, (piece) => {
+		const result = await streamAndAccumulate(res.body, (piece) => {
 			process.stdout.write(renderer.push(piece))
 		})
+		finalText = result.text
+		usage = result.usage
 
 		process.stdout.write(renderer.flush() + '\n\n')
 	} else {
@@ -584,6 +593,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effe
 			}, 2)
 			process.stderr.write(`${SGR.dim}[DEBUG response] ${debugJson}${SGR.reset}\n`)
 		}
+		usage = json?.usage ?? null
 		const msg = json?.choices?.[0]?.message ?? {}
 		const content = msg.content ?? ''
 
@@ -632,7 +642,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effe
 		}
 	}
 
-	return { finalText, images }
+	return { finalText, images, usage }
 }
 
 const promptSavePath = async ({ proposed }) => {
@@ -887,16 +897,61 @@ const main = async () => {
 		const cfgPath = await ensureConfig(root)
 		let cfg = await readConfig(cfgPath)
 
+		// --update-pricing: fetch and cache pricing data
+		if (opts.updatePricing) {
+			const baseUrl = cfg.base_url || 'https://openrouter.ai/api/v1'
+			process.stderr.write(`${SGR.dim}Fetching pricing from OpenRouter...${SGR.reset}\n`)
+			const cache = await ensurePricingCache(baseUrl, { force: true })
+			const count = Object.keys(cache.models).length
+			process.stderr.write(`${SGR.green}[Cached ${count} models → lib/pricing.json]${SGR.reset}\n`)
+			process.exit(0)
+			return
+		}
+
 		// --models: list available models and exit (no API key needed)
 		if (opts.listModels) {
 			const currentModel = cfg.model
+			const baseUrl = cfg.base_url || 'https://openrouter.ai/api/v1'
+			let cache = await readPricingCache()
+			if (!cache || isCacheStale(cache)) {
+				try {
+					process.stderr.write(`${SGR.dim}Updating pricing cache...${SGR.reset}\n`)
+					cache = await ensurePricingCache(baseUrl)
+				} catch {
+					// Continue without pricing data
+				}
+			}
+
 			console.log(`\n${SGR.bold}Available models:${SGR.reset}\n`)
+
+			// Table header
+			const hAlias = 'Alias'.padEnd(11)
+			const hCtx = 'Context'.padEnd(10)
+			const hIn = 'In/1M'.padEnd(9)
+			const hOut = 'Out/1M'.padEnd(9)
+			const hDesc = 'Description'
+			console.log(`  ${SGR.dim}${hAlias}${hCtx}${hIn}${hOut}${hDesc}${SGR.reset}`)
+			console.log(`  ${SGR.dim}${'─'.repeat(11)}${'─'.repeat(10)}${'─'.repeat(9)}${'─'.repeat(9)}${'─'.repeat(30)}${SGR.reset}`)
+
 			for (const m of MODELS) {
-				const marker = m.id === currentModel ? ` ${SGR.green}(current)${SGR.reset}` : ''
-				console.log(`  ${SGR.cyan}${m.alias.padEnd(10)}${SGR.reset} ${SGR.dim}${m.id}${SGR.reset}  ${m.description}${marker}`)
+				const marker = m.id === currentModel ? ` ${SGR.yellow}←${SGR.reset}` : ''
+				const entry = lookupPricing(cache, m.id)
+				const ctx = formatContextSize(entry?.context_length)
+				const inCost = formatCostPerMillion(entry?.pricing?.prompt)
+				const outCost = formatCostPerMillion(entry?.pricing?.completion)
+				console.log(`  ${SGR.cyan}${m.alias.padEnd(11)}${SGR.reset}${ctx.padEnd(10)}${inCost.padEnd(9)}${outCost.padEnd(9)}${m.description}${marker}`)
 			}
 			if (currentModel && !MODELS.find((m) => m.id === currentModel)) {
-				console.log(`\n  ${SGR.yellow}custom${SGR.reset}     ${SGR.dim}${currentModel}${SGR.reset} ${SGR.green}(current)${SGR.reset}`)
+				const entry = lookupPricing(cache, currentModel)
+				const ctx = formatContextSize(entry?.context_length)
+				const inCost = formatCostPerMillion(entry?.pricing?.prompt)
+				const outCost = formatCostPerMillion(entry?.pricing?.completion)
+				console.log(`\n  ${SGR.yellow}${'custom'.padEnd(11)}${SGR.reset}${ctx.padEnd(10)}${inCost.padEnd(9)}${outCost.padEnd(9)}${currentModel} ${SGR.yellow}←${SGR.reset}`)
+			}
+
+			if (cache?.fetched_at) {
+				const date = cache.fetched_at.slice(0, 10)
+				console.log(`\n  ${SGR.dim}Prices from cache (${date}). Run --update-pricing to refresh.${SGR.reset}`)
 			}
 			console.log()
 			process.exit(0)
@@ -926,7 +981,7 @@ const main = async () => {
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--max] [--init]')
+			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--max] [--update-pricing] [--init]')
 			process.exit(1)
 			return
 		}
@@ -959,9 +1014,14 @@ const main = async () => {
 
 		let lastFinalText = ''
 		let lastImages = []
+		let sessionCost = 0
+		let sessionTurns = 0
+
+		// Load pricing cache for cost display
+		let pricingCache = await readPricingCache()
 
 		while (true) {
-			const { finalText, images } = await streamCompletion({
+			const { finalText, images, usage } = await streamCompletion({
 				apiKey,
 				cfg,
 				opts,
@@ -971,6 +1031,29 @@ const main = async () => {
 
 			lastFinalText = finalText
 			lastImages = images || []
+
+			// Compute cost before appending to conversation
+			const resolvedModel = resolveModel(opts.model) ?? cfg.model
+			let costInfo = null
+			if (usage) {
+				const entry = lookupPricing(pricingCache, resolvedModel)
+				costInfo = calculateCost(usage, entry)
+				const indicator = contextIndicator(usage, entry?.context_length)
+				let convTotalCost = null
+				if (costInfo.cost != null) {
+					sessionCost += costInfo.cost
+					const priorCost = cfg.conversation
+						.filter(m => m.role === 'assistant' && m.usage?.cost != null)
+						.reduce((sum, m) => sum + m.usage.cost, 0)
+					convTotalCost = priorCost + costInfo.cost
+				}
+				const usageLine = formatUsageLine(costInfo, indicator, {
+					sessionCost,
+					totalCost: convTotalCost,
+				})
+				process.stderr.write(`${usageLine}\n`)
+				sessionTurns += 1
+			}
 
 			// Validate JSON in json format
 			let validatedText = finalText
@@ -990,7 +1073,16 @@ const main = async () => {
 				userMsg.attachments = currentAttachments.map((a) => a.path)
 			}
 			cfg.conversation.push(userMsg)
-			cfg.conversation.push({ role: 'assistant', content: validatedText ?? finalText, timestamp: isoNow() })
+			const assistantMsg = { role: 'assistant', content: validatedText ?? finalText, timestamp: isoNow() }
+			if (costInfo) {
+				assistantMsg.usage = {
+					prompt_tokens: costInfo.promptTokens,
+					completion_tokens: costInfo.completionTokens,
+					cost: costInfo.cost,
+					model: resolvedModel,
+				}
+			}
+			cfg.conversation.push(assistantMsg)
 			cfg.meta = cfg.meta || {}
 			cfg.meta.total_turns = Number(cfg.meta.total_turns || 0) + 1
 			cfg.meta.last_updated = isoNow()
@@ -1113,6 +1205,17 @@ const main = async () => {
 
 		// Always persist conversation
 		await writeConfigAtomic(cfgPath, cfg)
+		if (sessionTurns > 0) {
+			const turnLabel = sessionTurns === 1 ? '1 turn' : `${sessionTurns} turns`
+			let summary = `Session: ${turnLabel} \u00ab ${formatCost(sessionCost)}`
+			const convCost = cfg.conversation
+				.filter(m => m.role === 'assistant' && m.usage?.cost != null)
+				.reduce((sum, m) => sum + m.usage.cost, 0)
+			if (convCost > sessionCost + 0.000001) {
+				summary += ` \u00bb Conversation: ${formatCost(convCost)}`
+			}
+			process.stderr.write(`${SGR.dim}${summary}${SGR.reset}\n`)
+		}
 		process.stderr.write(`${SGR.cyan}[Context saved: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}\n`)
 		process.exit(0)
 	} catch (e) {
