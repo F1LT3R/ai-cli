@@ -4,7 +4,7 @@
 
 # ai-cli
 
-Minimal CLI to stream LLM responses via [OpenRouter](https://openrouter.ai) with interactive conversation mode, syntax-highlighted markdown, code extraction, and inline image display.
+Minimal CLI to stream LLM responses via [OpenRouter](https://openrouter.ai) with interactive conversation mode, file attachments, syntax-highlighted markdown, code extraction, and inline image display.
 
 ## Setup
 
@@ -91,6 +91,19 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `image` | google/gemini-2.5-flash-image | Image generation (Nano Banana) |
 
 You can also pass any full OpenRouter model ID directly: `--model anthropic/claude-sonnet-4.6`
+
+### File attachments
+
+Attach files as extra positional args after the prompt. Images (`.png`, `.jpg`, `.gif`, `.webp`, `.bmp`, `.svg`) are sent as base64; all other files are sent as inline text.
+
+```sh
+ai "describe this" photo.png
+ai "review these files" src/app.js src/utils.js
+```
+
+In interactive mode, drag files into the terminal or paste absolute paths at the `>` prompt. Multi-file drag-and-drop is supported (bracketed paste). If you provide only file paths with no text, the default prompt "Describe the attached files" is used.
+
+Attachments are stored in the conversation, so `--continue` re-reads the original files for context.
 
 ### Image generation
 
