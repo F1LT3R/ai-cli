@@ -621,7 +621,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effe
 		if (isITerm2()) {
 			displayITermImage(b64, `image.${ext}`)
 		} else {
-			const imgPath = path.resolve(process.cwd(), `image-${Date.now()}.${ext}`)
+			const imgPath = assertInsideCwd(path.resolve(process.cwd(), `image-${Date.now()}.${ext}`))
 			await fs.writeFile(imgPath, Buffer.from(b64, 'base64'))
 			process.stderr.write(`${SGR.green}[Image saved: ${SGR.reset}${imgPath}${SGR.green}]${SGR.reset}\n`)
 		}
@@ -658,7 +658,17 @@ const promptSavePath = async ({ proposed }) => {
 	}
 }
 
+const assertInsideCwd = (targetPath) => {
+	const resolved = path.resolve(targetPath)
+	const cwd = path.resolve(process.cwd())
+	if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) {
+		throw new Error(`Refusing to write outside working directory: ${resolved}`)
+	}
+	return resolved
+}
+
 const ensureParentDir = async (targetPath) => {
+	assertInsideCwd(targetPath)
 	const dir = path.dirname(targetPath)
 	await fs.mkdir(dir, { recursive: true })
 }
