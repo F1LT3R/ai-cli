@@ -29,7 +29,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```
-ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--debug] [--init]
+ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--init]
 ```
 
 ### Examples
@@ -67,6 +67,7 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `--continue` | Resume the previous conversation from config |
 | `--code` | Extract code blocks on save (suggests `code.js`, etc.) |
 | `--json` | Request JSON output format |
+| `--max` | Remove max_tokens cap, use model's full output limit |
 | `--debug` | Print raw request/response JSON to stderr |
 | `--init` | Create a local `.ai/config.json` in the current directory, inheriting from parent |
 

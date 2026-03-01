@@ -75,6 +75,7 @@ export const parseArgs = (argv) => {
 		listModels: false,
 		continueConv: false,
 		codeOnly: false,
+		maxTokens: false,
 		debug: false,
 		init: false,
 	}
@@ -117,6 +118,10 @@ export const parseArgs = (argv) => {
 		}
 		if (arg === '--code') {
 			opts.codeOnly = true
+			continue
+		}
+		if (arg === '--max') {
+			opts.maxTokens = true
 			continue
 		}
 		if (arg === '--debug') {
@@ -534,7 +539,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effe
 		model: resolvedModel,
 		stream: isImageModel ? false : (opts.stream ?? cfg.stream_default),
 		temperature: cfg.temperature,
-		max_tokens: cfg.max_tokens,
+		...(opts.maxTokens ? {} : { max_tokens: cfg.max_tokens }),
 		messages: await buildMessages({
 			system: opts.system ?? cfg.system,
 			conversation: cfg.conversation,
@@ -921,7 +926,7 @@ const main = async () => {
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--init]')
+			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--max] [--init]')
 			process.exit(1)
 			return
 		}
