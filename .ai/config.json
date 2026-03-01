@@ -1,13 +1,13 @@
 {
-  "provider": "openai",
-  "base_url": "https://api.openai.com/v1",
-  "model": "gpt-4.1-mini",
+  "provider": "openrouter",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "google/gemini-2.5-flash",
   "system": "You are a helpful assistant.",
   "temperature": 0.7,
   "max_tokens": 1024,
   "stream_default": true,
   "save_path_default": "ai.out.txt",
-  "env_key": "OPENAI_API_KEY",
+  "env_key": "OPENROUTER_API_KEY",
   "conversation": [
     {
       "role": "user",
@@ -408,11 +408,21 @@
       "role": "assistant",
       "content": "{\"ok\":true}",
       "timestamp": "2025-10-22T18:58:28.004Z"
+    },
+    {
+      "role": "user",
+      "content": "Say just the word hello",
+      "timestamp": "2026-03-01T03:51:46.640Z"
+    },
+    {
+      "role": "assistant",
+      "content": "{\n  \"response\": \"hello\"\n}",
+      "timestamp": "2026-03-01T03:51:46.640Z"
     }
   ],
   "meta": {
-    "last_updated": "2025-10-22T18:58:28.004Z",
-    "total_turns": 40,
+    "last_updated": "2026-03-01T03:51:46.640Z",
+    "total_turns": 41,
     "notes": "This file is updated by the CLI after each run. Do not check secrets into VCS.",
     "last_format": "json"
   },
