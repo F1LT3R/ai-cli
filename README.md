@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="ai-cli logo" width="128">
+</p>
+
 # ai-cli
 
 Minimal CLI to stream LLM responses via [OpenRouter](https://openrouter.ai) with interactive conversation mode, syntax-highlighted markdown, code extraction, and inline image display.
