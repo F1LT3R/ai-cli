@@ -206,7 +206,7 @@ const defaultConfig = () => ({
 	model: 'openai/gpt-4.1-nano-2025-04-14',
 	system: 'You are a helpful assistant.',
 	temperature: 0.7,
-	max_tokens: 1024,
+	max_tokens: 16384,
 	stream_default: true,
 	save_path_default: 'ai.out.txt',
 	env_key: 'OPENROUTER_API_KEY',
