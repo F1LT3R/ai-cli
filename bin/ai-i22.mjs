@@ -18,12 +18,32 @@ const SGR = {
 	red: '\x1b[31m',
 	magenta: '\x1b[35m',
 	bold: '\x1b[1m',
+	dim: '\x1b[2m',
+}
+
+const MODELS = [
+	{ alias: 'nano', id: 'openai/gpt-4.1-nano-2025-04-14', description: 'Cheapest, fast' },
+	{ alias: 'mini', id: 'openai/gpt-5-mini-2025-08-07', description: 'Low-cost OpenAI, good coding' },
+	{ alias: 'gpt5', id: 'openai/gpt-5.2-20251211', description: 'OpenAI GPT-5.2' },
+	{ alias: 'flash', id: 'google/gemini-2.5-flash', description: 'Gemini 2.5 Flash' },
+	{ alias: 'gemma', id: 'google/gemma-3-27b-it', description: 'Google Gemma 3 27B' },
+	{ alias: 'llama', id: 'meta-llama/llama-3.3-70b-instruct', description: 'Meta Llama 3.3 70B' },
+	{ alias: 'mistral', id: 'mistralai/mistral-small-3.2-24b-instruct-2506', description: 'Mistral Small 3.2' },
+	{ alias: 'deepseek', id: 'deepseek/deepseek-v3.2-20251201', description: 'DeepSeek V3.2' },
+]
+
+const resolveModel = (input) => {
+	if (!input) return undefined
+	const entry = MODELS.find((m) => m.alias === input)
+	if (entry) return entry.id
+	// Passthrough full model IDs (contain a slash)
+	return input
 }
 
 /*
 	CLI behavior:
 	- Discover project root by walking up from CWD to the nearest folder containing package.json
-	- Use `./.ai/openai.json` under that root for settings + conversation
+	- Use `./.ai/config.json` under that root for settings + conversation
 	- Auto-create the JSON file if missing (with sane defaults)
 	- Prepend prior conversation to the next request for continuity
 	- Stream tokens to stdout; then interactive autosave prompt (TTY-aware)
@@ -37,6 +57,7 @@ export const parseArgs = (argv) => {
 		system: undefined,
 		stream: true,
 		prompt: undefined,
+		listModels: false,
 	}
 
 	const args = argv.slice(2)
@@ -61,6 +82,10 @@ export const parseArgs = (argv) => {
 		}
 		if (arg === '--no-stream') {
 			opts.stream = false
+			continue
+		}
+		if (arg === '--models') {
+			opts.listModels = true
 			continue
 		}
 	}
@@ -106,15 +131,15 @@ const findProjectRoot = async (startDir) => {
 }
 
 const defaultConfig = () => ({
-	provider: 'openai',
-	base_url: 'https://api.openai.com/v1',
-	model: 'gpt-4o-mini',
+	provider: 'openrouter',
+	base_url: 'https://openrouter.ai/api/v1',
+	model: 'openai/gpt-4.1-nano-2025-04-14',
 	system: 'You are a helpful assistant.',
 	temperature: 0.7,
 	max_tokens: 1024,
 	stream_default: true,
 	save_path_default: 'ai.out.txt',
-	env_key: 'OPENAI_API_KEY',
+	env_key: 'OPENROUTER_API_KEY',
 	conversation: [],
 	meta: {
 		last_updated: null,
@@ -125,8 +150,23 @@ const defaultConfig = () => ({
 
 const ensureConfig = async (rootDir) => {
 	const aiDir = path.join(rootDir, '.ai')
-	const cfgPath = path.join(aiDir, 'openai.json')
+	const cfgPath = path.join(aiDir, 'config.json')
+	const oldPath = path.join(aiDir, 'openai.json')
 	await fs.mkdir(aiDir, { recursive: true })
+	// Migrate from old filename if needed
+	if (!(await fileExists(cfgPath)) && (await fileExists(oldPath))) {
+		await fs.rename(oldPath, cfgPath)
+		// Patch stale OpenAI defaults to OpenRouter
+		try {
+			const raw = await fs.readFile(cfgPath, 'utf8')
+			const obj = JSON.parse(raw)
+			let changed = false
+			if (obj.provider === 'openai') { obj.provider = 'openrouter'; changed = true }
+			if (obj.base_url === 'https://api.openai.com/v1') { obj.base_url = 'https://openrouter.ai/api/v1'; changed = true }
+			if (obj.env_key === 'OPENAI_API_KEY') { obj.env_key = 'OPENROUTER_API_KEY'; changed = true }
+			if (changed) await fs.writeFile(cfgPath, JSON.stringify(obj, null, 2) + '\n', 'utf8')
+		} catch {}
+	}
 	if (!(await fileExists(cfgPath))) {
 		const cfg = defaultConfig()
 		await fs.writeFile(cfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
@@ -149,7 +189,7 @@ const readConfig = async (cfgPath) => {
 	} catch (e) {
 		// Backup invalid file and recreate
 		try {
-			const bak = cfgPath.replace(/openai\.json$/, `openai.json.bak-${Date.now()}`)
+			const bak = cfgPath.replace(/config\.json$/, `config.json.bak-${Date.now()}`)
 			await fs.copyFile(cfgPath, bak).catch(() => {})
 		} catch {}
 		const fresh = defaultConfig()
@@ -166,19 +206,21 @@ const writeConfigAtomic = async (cfgPath, obj) => {
 
 const isoNow = () => new Date().toISOString()
 
-const openaiFetch = async ({ apiKey, body, baseUrl }) => {
+const completionFetch = async ({ apiKey, body, baseUrl }) => {
 	const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
 	const res = await fetch(url, {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/json',
 			authorization: `Bearer ${apiKey}`,
+			'HTTP-Referer': 'https://github.com/user/ai-cli',
+			'X-Title': 'ai-cli',
 		},
 		body: JSON.stringify(body),
 	})
 	if (!res.ok || !res.body) {
 		const text = await res.text().catch(() => '')
-		throw new Error(`OpenAI API error: ${res.status} ${res.statusText} ${text ? `- ${text}` : ''}`)
+		throw new Error(`API error: ${res.status} ${res.statusText} ${text ? `- ${text}` : ''}`)
 	}
 	return res
 }
@@ -253,7 +295,7 @@ const buildMessages = ({ system, conversation, prompt }) => {
 
 const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) => {
 	const body = {
-		model: opts.model ?? cfg.model,
+		model: resolveModel(opts.model) ?? cfg.model,
 		stream: opts.stream ?? cfg.stream_default,
 		temperature: cfg.temperature,
 		max_tokens: cfg.max_tokens,
@@ -264,7 +306,7 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) 
 		}),
 	}
 
-	const res = await openaiFetch({
+	const res = await completionFetch({
 		apiKey,
 		body: shapeRequestBody({ format: effectiveFormat, body }),
 		baseUrl: cfg.base_url,
@@ -362,13 +404,29 @@ const main = async () => {
 			return
 		}
 
+		// --models: list available models and exit
+		if (opts.listModels) {
+			const currentModel = cfg.model
+			console.log(`\n${SGR.bold}Available models:${SGR.reset}\n`)
+			for (const m of MODELS) {
+				const marker = m.id === currentModel ? ` ${SGR.green}(current)${SGR.reset}` : ''
+				console.log(`  ${SGR.cyan}${m.alias.padEnd(10)}${SGR.reset} ${SGR.dim}${m.id}${SGR.reset}  ${m.description}${marker}`)
+			}
+			if (currentModel && !MODELS.find((m) => m.id === currentModel)) {
+				console.log(`\n  ${SGR.yellow}custom${SGR.reset}     ${SGR.dim}${currentModel}${SGR.reset} ${SGR.green}(current)${SGR.reset}`)
+			}
+			console.log()
+			process.exit(0)
+			return
+		}
+
 		let prompt = opts.prompt
 		if (!prompt) {
 			prompt = await readAllStdin()
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt text>" [--model id] [--system text] [--no-stream]')
+			console.error('Usage: ai "<prompt text>" [--model id] [--system text] [--no-stream] [--models]')
 			process.exit(1)
 			return
 		}
@@ -376,7 +434,7 @@ const main = async () => {
 		
 		// Persist model/format if flags provided, and ensure defaults exist
 		if (__normalized.model && __normalized.model.length > 0) {
-			cfg.model = __normalized.model
+			cfg.model = resolveModel(__normalized.model)
 			await writeConfigAtomic(cfgPath, cfg)
 		}
 		if (__normalized.format) {
