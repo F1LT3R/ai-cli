@@ -33,6 +33,7 @@ const MODELS = [
 	{ alias: 'llama', id: 'meta-llama/llama-3.3-70b-instruct', description: 'Meta Llama 3.3 70B' },
 	{ alias: 'llama8b', id: 'meta-llama/llama-3.1-8b-instruct', description: 'Meta Llama 3.1 8B (tiny)' },
 	{ alias: 'qwen7b', id: 'qwen/qwen-2.5-7b-instruct', description: 'Qwen 2.5 7B (tiny)' },
+	{ alias: 'qwenvl', id: 'qwen/qwen-2.5-vl-7b-instruct', description: 'Qwen 2.5 VL 7B (vision, charts)' },
 	{ alias: 'phi', id: 'microsoft/phi-3.5-mini-128k-instruct', description: 'Microsoft Phi 3.5 Mini (tiny)' },
 	{ alias: 'mistral', id: 'mistralai/mistral-small-3.2-24b-instruct-2506', description: 'Mistral Small 3.2' },
 	{ alias: 'deepseek', id: 'deepseek/deepseek-v3.2-20251201', description: 'DeepSeek V3.2' },

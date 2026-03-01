@@ -72,6 +72,7 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `llama` | meta-llama/llama-3.3-70b | Meta Llama 3.3 70B |
 | `llama8b` | meta-llama/llama-3.1-8b | Meta Llama 3.1 8B (tiny) |
 | `qwen7b` | qwen/qwen-2.5-7b-instruct | Qwen 2.5 7B (tiny) |
+| `qwenvl` | qwen/qwen-2.5-vl-7b-instruct | Qwen 2.5 VL 7B (vision, charts) |
 | `phi` | microsoft/phi-3.5-mini-128k-instruct | Microsoft Phi 3.5 Mini (tiny) |
 | `mistral` | mistralai/mistral-small-3.2 | Mistral Small 3.2 |
 | `deepseek` | deepseek/deepseek-v3.2 | DeepSeek V3.2 |
