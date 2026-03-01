@@ -71,6 +71,7 @@ export const parseArgs = (argv) => {
 		system: undefined,
 		stream: true,
 		prompt: undefined,
+		files: [],
 		listModels: false,
 		continueConv: false,
 		codeOnly: false,
@@ -82,9 +83,13 @@ export const parseArgs = (argv) => {
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i]
 
-		// First non-flag token becomes the prompt
+		// First non-flag token becomes the prompt; subsequent ones are file candidates
 		if (!arg.startsWith('--') && opts.prompt === undefined) {
 			opts.prompt = arg
+			continue
+		}
+		if (!arg.startsWith('--') && opts.prompt !== undefined) {
+			opts.files.push(arg)
 			continue
 		}
 
@@ -271,6 +276,155 @@ const writeConfigAtomic = async (cfgPath, obj) => {
 
 const isoNow = () => new Date().toISOString()
 
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
+
+const isImageExt = (ext) => IMAGE_EXTS.has(ext.toLowerCase())
+
+const getMimeType = (ext) => {
+	const map = {
+		'.png': 'image/png',
+		'.jpg': 'image/jpeg',
+		'.jpeg': 'image/jpeg',
+		'.gif': 'image/gif',
+		'.webp': 'image/webp',
+		'.bmp': 'image/bmp',
+		'.svg': 'image/svg+xml',
+	}
+	return map[ext.toLowerCase()] || 'application/octet-stream'
+}
+
+const formatFileSize = (bytes) => {
+	if (bytes < 1024) return `${bytes} B`
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const resolveAttachments = async (paths) => {
+	const results = []
+	for (const p of paths) {
+		const abs = path.resolve(p)
+		try {
+			await fs.access(abs)
+			const stat = await fs.stat(abs)
+			if (!stat.isFile()) {
+				process.stderr.write(`${SGR.yellow}[Warning: not a file: ${abs}]${SGR.reset}\n`)
+				continue
+			}
+			const ext = path.extname(abs).toLowerCase()
+			results.push({
+				path: abs,
+				name: path.basename(abs),
+				size: stat.size,
+				type: isImageExt(ext) ? 'image' : 'text',
+			})
+		} catch {
+			process.stderr.write(`${SGR.yellow}[Warning: file not found: ${p}]${SGR.reset}\n`)
+		}
+	}
+	return results
+}
+
+const displayAttachments = (attachments, width) => {
+	if (!attachments.length) return
+	const parts = attachments.map((a) => {
+		const url = `file://${a.path}`
+		// OSC8 hyperlink: \x1b]8;;URL\x1b\\label\x1b]8;;\x1b\\
+		const link = `\x1b]8;;${url}\x1b\\${SGR.bold}${SGR.cyan}${a.name}${SGR.reset}\x1b]8;;\x1b\\`
+		return `${link} ${SGR.dim}(${formatFileSize(a.size)})${SGR.reset}`
+	})
+	process.stderr.write(`${SGR.dim}Attached:${SGR.reset} ${parts.join(` ${SGR.dim}\u00b7${SGR.reset} `)}\n`)
+}
+
+const extractFilePaths = async (input) => {
+	// Split respecting quotes and backslash-escaped spaces
+	const tokens = []
+	let current = ''
+	let inSingle = false
+	let inDouble = false
+	let escaped = false
+
+	for (const ch of input) {
+		if (escaped) {
+			current += ch
+			escaped = false
+			continue
+		}
+		if (ch === '\\') {
+			escaped = true
+			continue
+		}
+		if (ch === "'" && !inDouble) {
+			inSingle = !inSingle
+			continue
+		}
+		if (ch === '"' && !inSingle) {
+			inDouble = !inDouble
+			continue
+		}
+		if ((ch === ' ' || ch === '\t') && !inSingle && !inDouble) {
+			if (current.length) {
+				tokens.push(current)
+				current = ''
+			}
+			continue
+		}
+		current += ch
+	}
+	if (current.length) tokens.push(current)
+
+	const paths = []
+	const textParts = []
+
+	for (const token of tokens) {
+		const expanded = token.startsWith('~/')
+			? path.join(process.env.HOME || '', token.slice(2))
+			: token
+		if (/^(\/|\.\/|\.\.\/)/.test(expanded) || token.startsWith('~/')) {
+			const abs = path.resolve(expanded)
+			try {
+				await fs.access(abs)
+				const stat = await fs.stat(abs)
+				if (stat.isFile()) {
+					paths.push(abs)
+					continue
+				}
+			} catch {}
+		}
+		textParts.push(token)
+	}
+
+	const text = textParts.join(' ') || (paths.length ? 'Describe the attached files' : '')
+	return { text, paths }
+}
+
+const buildMultimodalContent = async (text, attachments) => {
+	const content = []
+	for (const a of attachments) {
+		if (a.type === 'image') {
+			const data = await fs.readFile(a.path)
+			const b64 = data.toString('base64')
+			const ext = path.extname(a.path).toLowerCase()
+			const mime = getMimeType(ext)
+			content.push({
+				type: 'image_url',
+				image_url: { url: `data:${mime};base64,${b64}` },
+			})
+		} else {
+			try {
+				const fileContent = await fs.readFile(a.path, 'utf8')
+				content.push({
+					type: 'text',
+					text: `File: ${a.name}\n\`\`\`\n${fileContent}\n\`\`\``,
+				})
+			} catch {
+				process.stderr.write(`${SGR.yellow}[Warning: could not read ${a.path}]${SGR.reset}\n`)
+			}
+		}
+	}
+	content.push({ type: 'text', text })
+	return content
+}
+
 const completionFetch = async ({ apiKey, body, baseUrl }) => {
 	const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
 	const res = await fetch(url, {
@@ -342,23 +496,36 @@ const streamAndAccumulate = async (readable, onDelta) => {
 	return final
 }
 
-const buildMessages = ({ system, conversation, prompt }) => {
+const buildMessages = async ({ system, conversation, prompt, attachments }) => {
 	const msgs = []
 	if (system) {
 		msgs.push({ role: 'system', content: system })
 	}
 	if (Array.isArray(conversation)) {
 		for (const m of conversation) {
-			if (m && typeof m.role === 'string' && typeof m.content === 'string') {
+			if (!m || typeof m.role !== 'string') continue
+			if (m.attachments?.length) {
+				// Re-resolve stored attachment paths
+				const resolved = await resolveAttachments(m.attachments)
+				if (resolved.length) {
+					msgs.push({ role: m.role, content: await buildMultimodalContent(m.content, resolved) })
+				} else {
+					if (typeof m.content === 'string') msgs.push({ role: m.role, content: m.content })
+				}
+			} else if (typeof m.content === 'string') {
 				msgs.push({ role: m.role, content: m.content })
 			}
 		}
 	}
-	msgs.push({ role: 'user', content: prompt })
+	if (attachments?.length) {
+		msgs.push({ role: 'user', content: await buildMultimodalContent(prompt, attachments) })
+	} else {
+		msgs.push({ role: 'user', content: prompt })
+	}
 	return msgs
 }
 
-const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) => {
+const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effectiveFormat) => {
 	const resolvedModel = resolveModel(opts.model) ?? cfg.model
 	const modelEntry = MODELS.find((m) => m.id === resolvedModel)
 	const isImageModel = Boolean(modelEntry?.image)
@@ -368,10 +535,11 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) 
 		stream: isImageModel ? false : (opts.stream ?? cfg.stream_default),
 		temperature: cfg.temperature,
 		max_tokens: cfg.max_tokens,
-		messages: buildMessages({
+		messages: await buildMessages({
 			system: opts.system ?? cfg.system,
 			conversation: cfg.conversation,
 			prompt,
+			attachments,
 		}),
 	}
 
@@ -519,13 +687,26 @@ const interactivePrompt = () => new Promise((resolve) => {
 	process.stderr.write(`${SGR.green}> ${SGR.reset}`)
 
 	let buf = ''
+	let pasting = false
 	readline_raw.emitKeypressEvents(process.stdin)
 	const wasRaw = process.stdin.isRaw
 	if (process.stdin.isTTY) process.stdin.setRawMode(true)
 
+	// Enable bracketed paste mode so multi-file drag-and-drop works
+	process.stderr.write('\x1b[?2004h')
+
 	const cleanup = () => {
+		process.stderr.write('\x1b[?2004l')
 		process.stdin.removeListener('keypress', onKey)
+		process.stdin.removeListener('data', onData)
 		if (process.stdin.isTTY) process.stdin.setRawMode(wasRaw)
+	}
+
+	// Raw data listener to detect bracketed paste sequences
+	const onData = (data) => {
+		const s = typeof data === 'string' ? data : data.toString()
+		if (s.includes('\x1b[200~')) pasting = true
+		if (s.includes('\x1b[201~')) pasting = false
 	}
 
 	const onKey = (str, key) => {
@@ -539,8 +720,8 @@ const interactivePrompt = () => new Promise((resolve) => {
 			return
 		}
 
-		// Escape
-		if (key.name === 'escape') {
+		// Escape — ignore during paste (terminals may send escape sequences)
+		if (key.name === 'escape' && !pasting) {
 			cleanup()
 			process.stderr.write('\n')
 			resolve({ action: 'save_response' })
@@ -555,8 +736,13 @@ const interactivePrompt = () => new Promise((resolve) => {
 			return
 		}
 
-		// Enter
+		// Enter — during paste, treat as space separator; otherwise submit
 		if (key.name === 'return') {
+			if (pasting) {
+				buf += ' '
+				process.stderr.write(' ')
+				return
+			}
 			if (buf.trim().length > 0) {
 				cleanup()
 				process.stderr.write('\n')
@@ -581,6 +767,7 @@ const interactivePrompt = () => new Promise((resolve) => {
 		}
 	}
 
+	process.stdin.on('data', onData)
 	process.stdin.on('keypress', onKey)
 })
 
@@ -715,10 +902,22 @@ const main = async () => {
 			prompt = await readAllStdin()
 		}
 
+		// Resolve file attachments from CLI args
+		let currentAttachments = opts.files.length ? await resolveAttachments(opts.files) : []
+
+		// If no prompt but files were provided, use a default prompt
+		if (!prompt && currentAttachments.length) {
+			prompt = 'Describe the attached files'
+		}
+
 		if (!prompt) {
-			console.error('Usage: ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--init]')
+			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--init]')
 			process.exit(1)
 			return
+		}
+
+		if (currentAttachments.length) {
+			displayAttachments(currentAttachments, process.stderr.columns || 80)
 		}
 
 		
@@ -752,6 +951,7 @@ const main = async () => {
 				cfg,
 				opts,
 				prompt,
+				attachments: currentAttachments,
 			}, effectiveFormat)
 
 			lastFinalText = finalText
@@ -770,7 +970,11 @@ const main = async () => {
 
 			// Append to conversation
 			cfg.conversation = Array.isArray(cfg.conversation) ? cfg.conversation : []
-			cfg.conversation.push({ role: 'user', content: prompt, timestamp: isoNow() })
+			const userMsg = { role: 'user', content: prompt, timestamp: isoNow() }
+			if (currentAttachments?.length) {
+				userMsg.attachments = currentAttachments.map((a) => a.path)
+			}
+			cfg.conversation.push(userMsg)
 			cfg.conversation.push({ role: 'assistant', content: validatedText ?? finalText, timestamp: isoNow() })
 			cfg.meta = cfg.meta || {}
 			cfg.meta.total_turns = Number(cfg.meta.total_turns || 0) + 1
@@ -791,7 +995,17 @@ const main = async () => {
 			const result = await interactivePrompt()
 
 			if (result.action === 'continue') {
-				prompt = result.text
+				const extracted = await extractFilePaths(result.text)
+				if (extracted.paths.length) {
+					currentAttachments = await resolveAttachments(extracted.paths)
+					if (currentAttachments.length) {
+						displayAttachments(currentAttachments, process.stderr.columns || 80)
+					}
+					prompt = extracted.text
+				} else {
+					currentAttachments = []
+					prompt = result.text
+				}
 				continue
 			}
 

@@ -22,7 +22,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```
-ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--debug] [--init]
+ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--debug] [--init]
 ```
 
 ### Examples
@@ -32,15 +32,17 @@ ai "explain closures in javascript" --model flash
 ai "write a node http server" --code --model nano
 ai "list 5 fruits" --json
 ai "draw a banana" --model image
-ai --continue "now make it yellow"     # resume prior conversation
-echo "summarize this" | ai             # pipe input
+ai "describe this" photo.png                  # attach an image
+ai "review these" src/app.js src/utils.js     # attach text files
+ai --continue "now make it yellow"            # resume prior conversation
+echo "summarize this" | ai                    # pipe input
 ```
 
 ### Interactive mode
 
 After each response, you get an interactive prompt:
 
-- **Type + Enter** — send a follow-up message
+- **Type + Enter** — send a follow-up (drag/paste file paths to attach them)
 - **Esc** — save the last response to a file
 - **Ctrl+S** — save the full conversation transcript
 - **Ctrl+C** — exit (conversation is persisted to config)
