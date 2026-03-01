@@ -65,16 +65,25 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `mini` | openai/gpt-5-mini | Low-cost, good coding |
 | `gpt5` | openai/gpt-5.2 | OpenAI GPT-5.2 |
 | `flash` | google/gemini-2.5-flash | Gemini 2.5 Flash |
+| `flash3` | google/gemini-3-flash-preview | Gemini 3 Flash (preview) |
+| `pro3` | google/gemini-3-pro-preview | Gemini 3 Pro (preview) |
 | `gemma` | google/gemma-3-27b-it | Google Gemma 3 27B |
+| `gemma4b` | google/gemma-3-4b-it | Google Gemma 3 4B (tiny) |
 | `llama` | meta-llama/llama-3.3-70b | Meta Llama 3.3 70B |
+| `llama8b` | meta-llama/llama-3.1-8b | Meta Llama 3.1 8B (tiny) |
+| `qwen7b` | qwen/qwen-2.5-7b-instruct | Qwen 2.5 7B (tiny) |
+| `phi` | microsoft/phi-3.5-mini-128k-instruct | Microsoft Phi 3.5 Mini (tiny) |
 | `mistral` | mistralai/mistral-small-3.2 | Mistral Small 3.2 |
 | `deepseek` | deepseek/deepseek-v3.2 | DeepSeek V3.2 |
 | `kimi` | moonshotai/kimi-k2.5 | Moonshot Kimi K2.5 |
 | `grok` | x-ai/grok-4 | xAI Grok 4 (thinking) |
 | `grokcode` | x-ai/grok-code-fast-1 | xAI Grok Code Fast |
+| `haiku` | anthropic/claude-haiku-4.5 | Claude Haiku 4.5 (fast) |
+| `sonnet` | anthropic/claude-sonnet-4.6 | Claude Sonnet 4.6 |
+| `opus` | anthropic/claude-opus-4.6 | Claude Opus 4.6 |
 | `image` | google/gemini-2.5-flash-image | Image generation (Nano Banana) |
 
-You can also pass any full OpenRouter model ID directly: `--model anthropic/claude-sonnet-4`
+You can also pass any full OpenRouter model ID directly: `--model anthropic/claude-sonnet-4.6`
 
 ### Image generation
 

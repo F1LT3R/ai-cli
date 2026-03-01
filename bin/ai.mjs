@@ -26,13 +26,22 @@ const MODELS = [
 	{ alias: 'mini', id: 'openai/gpt-5-mini-2025-08-07', description: 'Low-cost OpenAI, good coding' },
 	{ alias: 'gpt5', id: 'openai/gpt-5.2-20251211', description: 'OpenAI GPT-5.2' },
 	{ alias: 'flash', id: 'google/gemini-2.5-flash', description: 'Gemini 2.5 Flash' },
+	{ alias: 'flash3', id: 'google/gemini-3-flash-preview', description: 'Gemini 3 Flash (preview)' },
+	{ alias: 'pro3', id: 'google/gemini-3-pro-preview', description: 'Gemini 3 Pro (preview)' },
 	{ alias: 'gemma', id: 'google/gemma-3-27b-it', description: 'Google Gemma 3 27B' },
+	{ alias: 'gemma4b', id: 'google/gemma-3-4b-it', description: 'Google Gemma 3 4B (tiny)' },
 	{ alias: 'llama', id: 'meta-llama/llama-3.3-70b-instruct', description: 'Meta Llama 3.3 70B' },
+	{ alias: 'llama8b', id: 'meta-llama/llama-3.1-8b-instruct', description: 'Meta Llama 3.1 8B (tiny)' },
+	{ alias: 'qwen7b', id: 'qwen/qwen-2.5-7b-instruct', description: 'Qwen 2.5 7B (tiny)' },
+	{ alias: 'phi', id: 'microsoft/phi-3.5-mini-128k-instruct', description: 'Microsoft Phi 3.5 Mini (tiny)' },
 	{ alias: 'mistral', id: 'mistralai/mistral-small-3.2-24b-instruct-2506', description: 'Mistral Small 3.2' },
 	{ alias: 'deepseek', id: 'deepseek/deepseek-v3.2-20251201', description: 'DeepSeek V3.2' },
 	{ alias: 'kimi', id: 'moonshotai/kimi-k2.5', description: 'Moonshot Kimi K2.5' },
 	{ alias: 'grok', id: 'x-ai/grok-4', description: 'xAI Grok 4 (thinking)' },
 	{ alias: 'grokcode', id: 'x-ai/grok-code-fast-1', description: 'xAI Grok Code Fast' },
+	{ alias: 'haiku', id: 'anthropic/claude-haiku-4.5', description: 'Claude Haiku 4.5 (fast)' },
+	{ alias: 'sonnet', id: 'anthropic/claude-sonnet-4.6', description: 'Claude Sonnet 4.6' },
+	{ alias: 'opus', id: 'anthropic/claude-opus-4.6', description: 'Claude Opus 4.6' },
 	{ alias: 'image', id: 'google/gemini-2.5-flash-image', description: 'Nano Banana — image gen', image: true },
 ]
 
@@ -675,16 +684,7 @@ const main = async () => {
 		const cfgPath = await ensureConfig(root)
 		let cfg = await readConfig(cfgPath)
 
-		// Respect env key name in config
-		const envKeyName = cfg.env_key || 'OPENAI_API_KEY'
-		const apiKey = process.env[envKeyName]
-		if (!apiKey) {
-			console.error(`Missing ${envKeyName} in environment`)
-			process.exit(3)
-			return
-		}
-
-		// --models: list available models and exit
+		// --models: list available models and exit (no API key needed)
 		if (opts.listModels) {
 			const currentModel = cfg.model
 			console.log(`\n${SGR.bold}Available models:${SGR.reset}\n`)
@@ -697,6 +697,15 @@ const main = async () => {
 			}
 			console.log()
 			process.exit(0)
+			return
+		}
+
+		// Respect env key name in config
+		const envKeyName = cfg.env_key || 'OPENAI_API_KEY'
+		const apiKey = process.env[envKeyName]
+		if (!apiKey) {
+			console.error(`Missing ${envKeyName} in environment`)
+			process.exit(3)
 			return
 		}
 
