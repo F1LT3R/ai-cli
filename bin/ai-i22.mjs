@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import * as readline from 'node:readline/promises'
+import readline_raw from 'node:readline'
 import { stdin as rlIn, stderr as rlErr } from 'node:process'
 import { MarkdownRenderer } from '../lib/markdown-renderer-i5.mjs'
 import { parseOptions } from '../lib/options-i3.mjs'
@@ -30,6 +31,7 @@ const MODELS = [
 	{ alias: 'llama', id: 'meta-llama/llama-3.3-70b-instruct', description: 'Meta Llama 3.3 70B' },
 	{ alias: 'mistral', id: 'mistralai/mistral-small-3.2-24b-instruct-2506', description: 'Mistral Small 3.2' },
 	{ alias: 'deepseek', id: 'deepseek/deepseek-v3.2-20251201', description: 'DeepSeek V3.2' },
+	{ alias: 'image', id: 'google/gemini-2.5-flash-image', description: 'Nano Banana — image gen', image: true },
 ]
 
 const resolveModel = (input) => {
@@ -58,6 +60,9 @@ export const parseArgs = (argv) => {
 		stream: true,
 		prompt: undefined,
 		listModels: false,
+		continueConv: false,
+		codeOnly: false,
+		debug: false,
 	}
 
 	const args = argv.slice(2)
@@ -86,6 +91,18 @@ export const parseArgs = (argv) => {
 		}
 		if (arg === '--models') {
 			opts.listModels = true
+			continue
+		}
+		if (arg === '--continue') {
+			opts.continueConv = true
+			continue
+		}
+		if (arg === '--code') {
+			opts.codeOnly = true
+			continue
+		}
+		if (arg === '--debug') {
+			opts.debug = true
 			continue
 		}
 	}
@@ -294,9 +311,13 @@ const buildMessages = ({ system, conversation, prompt }) => {
 }
 
 const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) => {
+	const resolvedModel = resolveModel(opts.model) ?? cfg.model
+	const modelEntry = MODELS.find((m) => m.id === resolvedModel)
+	const isImageModel = Boolean(modelEntry?.image)
+
 	const body = {
-		model: resolveModel(opts.model) ?? cfg.model,
-		stream: opts.stream ?? cfg.stream_default,
+		model: resolvedModel,
+		stream: isImageModel ? false : (opts.stream ?? cfg.stream_default),
 		temperature: cfg.temperature,
 		max_tokens: cfg.max_tokens,
 		messages: buildMessages({
@@ -306,30 +327,91 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt }, effectiveFormat) 
 		}),
 	}
 
+	if (isImageModel) {
+		body.modalities = ['image', 'text']
+	}
+
+	const shaped = shapeRequestBody({ format: effectiveFormat, body })
+	if (opts.debug) {
+		process.stderr.write(`${SGR.dim}[DEBUG request] ${JSON.stringify(shaped, null, 2)}${SGR.reset}\n`)
+	}
+
 	const res = await completionFetch({
 		apiKey,
-		body: shapeRequestBody({ format: effectiveFormat, body }),
+		body: shaped,
 		baseUrl: cfg.base_url,
 	})
-	
+
 	console.log(`\n${SGR.bold}${SGR.cyan}Response:${SGR.reset}\n`)
 
 	let finalText = ''
+	let images = []
 	if (body.stream) {
 		const renderer = new MarkdownRenderer({ tty: process.stdout.isTTY })
 		finalText = await streamAndAccumulate(res.body, (piece) => {
 			process.stdout.write(renderer.push(piece))
 		})
-		
+
 		process.stdout.write(renderer.flush() + '\n\n')
 	} else {
 		const json = await res.json()
-		const content = json?.choices?.[0]?.message?.content ?? ''
-		process.stdout.write(content + '\n')
-		finalText = content
+		if (opts.debug) {
+			// Truncate base64 data for readability
+			const debugJson = JSON.stringify(json, (k, v) => {
+				if (typeof v === 'string' && v.startsWith('data:image/')) return v.slice(0, 60) + '...[truncated]'
+				return v
+			}, 2)
+			process.stderr.write(`${SGR.dim}[DEBUG response] ${debugJson}${SGR.reset}\n`)
+		}
+		const msg = json?.choices?.[0]?.message ?? {}
+		const content = msg.content ?? ''
+
+		// Handle multipart content (image models may return array)
+		if (Array.isArray(content)) {
+			const textParts = []
+			for (const part of content) {
+				if (part.type === 'text') {
+					textParts.push(part.text)
+				} else if (part.type === 'image_url') {
+					images.push(part.image_url?.url)
+				}
+			}
+			finalText = textParts.join('\n')
+		} else {
+			finalText = content
+		}
+
+		// Images may also arrive in a separate msg.images array
+		if (Array.isArray(msg.images)) {
+			for (const img of msg.images) {
+				if (img.type === 'image_url' && img.image_url?.url) {
+					images.push(img.image_url.url)
+				}
+			}
+		}
+
+		if (finalText) {
+			process.stdout.write(finalText + '\n')
+		}
 	}
 
-	return { finalText }
+	// Display any images from the response
+	for (const dataUrl of images) {
+		if (!dataUrl) continue
+		const m = dataUrl.match(/^data:image\/([\w+]+);base64,(.+)$/)
+		if (!m) continue
+		const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+		const b64 = m[2]
+		if (isITerm2()) {
+			displayITermImage(b64, `image.${ext}`)
+		} else {
+			const imgPath = path.resolve(process.cwd(), `image-${Date.now()}.${ext}`)
+			await fs.writeFile(imgPath, Buffer.from(b64, 'base64'))
+			process.stderr.write(`${SGR.green}[Image saved: ${SGR.reset}${imgPath}${SGR.green}]${SGR.reset}\n`)
+		}
+	}
+
+	return { finalText, images }
 }
 
 const promptSavePath = async ({ proposed }) => {
@@ -384,6 +466,140 @@ const confirmOverwriteIfExists = async (targetPath) => {
 	return ok
 }
 
+const interactivePrompt = () => new Promise((resolve) => {
+	process.stderr.write(`\n${SGR.dim}Type to continue${SGR.reset} ${SGR.yellow}|${SGR.reset} ${SGR.dim}Esc: save response${SGR.reset} ${SGR.yellow}|${SGR.reset} ${SGR.dim}Ctrl+S: save transcript${SGR.reset}\n`)
+	process.stderr.write(`${SGR.green}> ${SGR.reset}`)
+
+	let buf = ''
+	readline_raw.emitKeypressEvents(process.stdin)
+	const wasRaw = process.stdin.isRaw
+	if (process.stdin.isTTY) process.stdin.setRawMode(true)
+
+	const cleanup = () => {
+		process.stdin.removeListener('keypress', onKey)
+		if (process.stdin.isTTY) process.stdin.setRawMode(wasRaw)
+	}
+
+	const onKey = (str, key) => {
+		if (!key) return
+
+		// Ctrl+C
+		if (key.ctrl && key.name === 'c') {
+			cleanup()
+			process.stderr.write('\n')
+			resolve({ action: 'cancel' })
+			return
+		}
+
+		// Escape
+		if (key.name === 'escape') {
+			cleanup()
+			process.stderr.write('\n')
+			resolve({ action: 'save_response' })
+			return
+		}
+
+		// Ctrl+S
+		if (key.ctrl && key.name === 's') {
+			cleanup()
+			process.stderr.write('\n')
+			resolve({ action: 'save_transcript' })
+			return
+		}
+
+		// Enter
+		if (key.name === 'return') {
+			if (buf.trim().length > 0) {
+				cleanup()
+				process.stderr.write('\n')
+				resolve({ action: 'continue', text: buf.trim() })
+			}
+			return
+		}
+
+		// Backspace
+		if (key.name === 'backspace') {
+			if (buf.length > 0) {
+				buf = buf.slice(0, -1)
+				process.stderr.write('\b \b')
+			}
+			return
+		}
+
+		// Printable characters
+		if (str && !key.ctrl && !key.meta) {
+			buf += str
+			process.stderr.write(str)
+		}
+	}
+
+	process.stdin.on('keypress', onKey)
+})
+
+const extractCode = (markdown) => {
+	const blocks = []
+	const re = /^```(\w+)?\s*\n([\s\S]*?)\n```$/gm
+	let match
+	while ((match = re.exec(markdown)) !== null) {
+		blocks.push({ lang: match[1] || '', code: match[2] })
+	}
+	return blocks
+}
+
+const langToExt = (lang) => {
+	const map = {
+		js: '.js',
+		javascript: '.js',
+		mjs: '.mjs',
+		ts: '.ts',
+		typescript: '.ts',
+		python: '.py',
+		py: '.py',
+		go: '.go',
+		rust: '.rs',
+		rs: '.rs',
+		sh: '.sh',
+		bash: '.sh',
+		zsh: '.sh',
+		ruby: '.rb',
+		rb: '.rb',
+		java: '.java',
+		c: '.c',
+		cpp: '.cpp',
+		'c++': '.cpp',
+		css: '.css',
+		html: '.html',
+		json: '.json',
+		yaml: '.yaml',
+		yml: '.yaml',
+		toml: '.toml',
+		sql: '.sql',
+		swift: '.swift',
+		kotlin: '.kt',
+		kt: '.kt',
+		php: '.php',
+		lua: '.lua',
+		r: '.r',
+	}
+	return map[lang.toLowerCase()] || '.txt'
+}
+
+const formatTranscript = (conversation) => {
+	const parts = []
+	for (const msg of conversation) {
+		const role = msg.role === 'user' ? 'User' : 'Assistant'
+		parts.push(`## ${role}\n\n${msg.content}`)
+	}
+	return parts.join('\n\n')
+}
+
+const isITerm2 = () => process.env.TERM_PROGRAM === 'iTerm.app'
+
+const displayITermImage = (base64Data, filename = 'image.png') => {
+	const name64 = Buffer.from(filename).toString('base64')
+	process.stdout.write(`\x1b]1337;File=name=${name64};inline=1:${base64Data}\x07\n`)
+}
+
 const main = async () => {
 	// Normalize high-level options (format/model) with our helper
 	const __normalized = parseOptions(process.argv, { isTty: process.stdout.isTTY })
@@ -426,7 +642,7 @@ const main = async () => {
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt text>" [--model id] [--system text] [--no-stream] [--models]')
+			console.error('Usage: ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code]')
 			process.exit(1)
 			return
 		}
@@ -444,79 +660,157 @@ const main = async () => {
 			await writeConfigAtomic(cfgPath, cfg)
 		}
 
-		const effectiveFormat = (typeof cfg?.format === 'string' && cfg.format) || (typeof cfg?.meta?.last_format === 'string' && cfg.meta.last_format) || 'text'
+		const effectiveFormat = __normalized.provided.format
+			? __normalized.format
+			: 'text'
 
-		// console.log({effectiveFormat})
-		// console.log({'cfg.format': cfg.format})
-		// console.log({'cfg.meta.last_format': cfg.meta.last_format})
+		// Clear conversation unless --continue
+		if (!opts.continueConv && !__normalized.continueConv) {
+			cfg.conversation = []
+		}
 
-		const { finalText } = await streamCompletion({
-			apiKey,
-			cfg,
-			opts,
-			prompt,
-		}, effectiveFormat)
+		let lastFinalText = ''
+		let lastImages = []
 
-		// Validate JSON in json format
-		let validatedText = finalText
-		if (effectiveFormat === 'json') {
-			try {
-				const parsed = JSON.parse(finalText)
-				validatedText = JSON.stringify(parsed, null, 2)
-			} catch (e) {
-				// JSON invalid: we will save a partial sidecar after prompting for path
-				validatedText = null
+		while (true) {
+			const { finalText, images } = await streamCompletion({
+				apiKey,
+				cfg,
+				opts,
+				prompt,
+			}, effectiveFormat)
+
+			lastFinalText = finalText
+			lastImages = images || []
+
+			// Validate JSON in json format
+			let validatedText = finalText
+			if (effectiveFormat === 'json') {
+				try {
+					const parsed = JSON.parse(finalText)
+					validatedText = JSON.stringify(parsed, null, 2)
+				} catch {
+					validatedText = null
+				}
+			}
+
+			// Append to conversation
+			cfg.conversation = Array.isArray(cfg.conversation) ? cfg.conversation : []
+			cfg.conversation.push({ role: 'user', content: prompt, timestamp: isoNow() })
+			cfg.conversation.push({ role: 'assistant', content: validatedText ?? finalText, timestamp: isoNow() })
+			cfg.meta = cfg.meta || {}
+			cfg.meta.total_turns = Number(cfg.meta.total_turns || 0) + 1
+			cfg.meta.last_updated = isoNow()
+
+			// Non-TTY: auto-save response to default path and exit
+			if (!process.stdin.isTTY) {
+				const nextTurn = cfg.meta.total_turns
+				const defaultName = (effectiveFormat === 'json') ? `conv-${nextTurn}.json` : `conv-${nextTurn}.md`
+				const targetPath = path.resolve(process.cwd(), defaultName)
+				await ensureParentDir(targetPath)
+				await fs.writeFile(targetPath, finalText + '\n', 'utf8')
+				await writeConfigAtomic(cfgPath, cfg)
+				process.stderr.write(`${SGR.green}[Saved: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+				break
+			}
+
+			const result = await interactivePrompt()
+
+			if (result.action === 'continue') {
+				prompt = result.text
+				continue
+			}
+
+			if (result.action === 'save_response') {
+				// If response has images, save the image(s) instead of text
+				if (lastImages.length > 0) {
+					const defaultName = lastImages.length === 1 ? 'image.png' : 'image-1.png'
+					const chosen = await promptSavePath({ proposed: defaultName })
+					if (chosen === null) {
+						process.stderr.write(`${SGR.red}[Save canceled]${SGR.reset}\n`)
+					} else {
+						for (let idx = 0; idx < lastImages.length; idx++) {
+							const dataUrl = lastImages[idx]
+							const m = dataUrl.match(/^data:image\/([\w+]+);base64,(.+)$/)
+							if (!m) continue
+							const b64 = m[2]
+							let savePath = chosen
+							if (lastImages.length > 1) {
+								const ext = path.extname(chosen)
+								const base = chosen.replace(ext, '')
+								savePath = `${base}-${idx + 1}${ext || '.png'}`
+							}
+							const targetPath = path.resolve(process.cwd(), savePath)
+							await ensureParentDir(targetPath)
+							if (await confirmOverwriteIfExists(targetPath)) {
+								await fs.writeFile(targetPath, Buffer.from(b64, 'base64'))
+								process.stderr.write(`${SGR.green}[Saved image: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+							} else {
+								process.stderr.write(`${SGR.red}[Not saved: file exists]${SGR.reset}\n`)
+							}
+						}
+					}
+				} else {
+					let saveContent = lastFinalText
+					let defaultName
+
+					if (opts.codeOnly || __normalized.codeOnly) {
+						const blocks = extractCode(lastFinalText)
+						if (blocks.length > 0) {
+							saveContent = blocks.map((b) => b.code).join('\n\n')
+							const ext = langToExt(blocks[0].lang)
+							defaultName = `code${ext}`
+						} else {
+							defaultName = `conv-${cfg.meta.total_turns}.md`
+						}
+					} else {
+						defaultName = (effectiveFormat === 'json') ? `conv-${cfg.meta.total_turns}.json` : `conv-${cfg.meta.total_turns}.md`
+					}
+
+					const chosen = await promptSavePath({ proposed: defaultName })
+					if (chosen === null) {
+						process.stderr.write(`${SGR.red}[Save canceled]${SGR.reset}\n`)
+					} else {
+						const targetPath = path.resolve(process.cwd(), chosen)
+						await ensureParentDir(targetPath)
+						if (await confirmOverwriteIfExists(targetPath)) {
+							await fs.writeFile(targetPath, saveContent + '\n', 'utf8')
+							process.stderr.write(`${SGR.green}[Saved: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+						} else {
+							process.stderr.write(`${SGR.red}[Not saved: file exists]${SGR.reset}\n`)
+						}
+					}
+				}
+				break
+			}
+
+			if (result.action === 'save_transcript') {
+				const transcript = formatTranscript(cfg.conversation)
+				const defaultName = `transcript-${cfg.meta.total_turns}.md`
+				const chosen = await promptSavePath({ proposed: defaultName })
+				if (chosen === null) {
+					process.stderr.write(`${SGR.red}[Save canceled]${SGR.reset}\n`)
+				} else {
+					const targetPath = path.resolve(process.cwd(), chosen)
+					await ensureParentDir(targetPath)
+					if (await confirmOverwriteIfExists(targetPath)) {
+						await fs.writeFile(targetPath, transcript + '\n', 'utf8')
+						process.stderr.write(`${SGR.green}[Saved transcript: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+					} else {
+						process.stderr.write(`${SGR.red}[Not saved: file exists]${SGR.reset}\n`)
+					}
+				}
+				break
+			}
+
+			if (result.action === 'cancel') {
+				break
 			}
 		}
 
-		// Update conversation + meta before computing default filename (turn = total_turns + 1)
-		cfg = await readConfig(cfgPath) // re-read in case another process wrote
-		cfg.conversation = Array.isArray(cfg.conversation) ? cfg.conversation : []
-		cfg.conversation.push({ role: 'user', content: prompt, timestamp: isoNow() })
-		cfg.conversation.push({ role: 'assistant', content: validatedText ?? finalText, timestamp: isoNow() })
-		cfg.meta = cfg.meta || {}
-		const nextTurn = Number(cfg.meta.total_turns || 0) + 1
-		cfg.meta.total_turns = nextTurn
-		cfg.meta.last_updated = isoNow()
-		// await writeConfigAtomic(cfgPath, cfg)
-
-		// Determine default filename and prompt user for save path (TTY-aware)
-		const defaultName = (effectiveFormat === 'json') ? `conv-${nextTurn}.json` : `conv-${nextTurn}.md`
-		let chosen = await promptSavePath({ proposed: defaultName })
-
-		// If Ctrl-C or null → abort saving but keep streamed output
-		if (chosen === null) {
-			process.stderr.write(`${SGR.red}[Save canceled]${SGR.reset}\n`)
-			process.stderr.write(`${SGR.magenta}[Context not written: ${SGR.reset}${cfgPath}${SGR.magenta}]${SGR.reset}\n`)
-			process.exit(0)
-			return
-		}
-
-		// Resolve to absolute path from CWD and create parents
-		const targetPath = path.resolve(process.cwd(), chosen)
-		await ensureParentDir(targetPath)
-
-		// If exists, confirm overwrite
-		if (!(await confirmOverwriteIfExists(targetPath))) {
-			process.stderr.write(`${SGR.red}[Not saved: file exists]${SGR.reset}\n`)
-			process.stderr.write(`${SGR.magenta}[Context not written: ${SGR.reset}${cfgPath}${SGR.magenta}]${SGR.reset}\n`)
-			process.exit(0)
-			return
-		}
-
-		// Write final text with newline
-		await fs.writeFile(targetPath, finalText + '\n', 'utf8')
+		// Always persist conversation
 		await writeConfigAtomic(cfgPath, cfg)
-
-		process.stderr.write(`
-			${SGR.green}[Saved final output to: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}
-		`)
-
-		process.stderr.write(
-			`${SGR.cyan}[Updated context: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}
-		`)
-
-		console.log()
+		process.stderr.write(`${SGR.cyan}[Context saved: ${SGR.reset}${cfgPath}${SGR.cyan}]${SGR.reset}\n`)
 		process.exit(0)
 	} catch (e) {
 		console.error(e)
