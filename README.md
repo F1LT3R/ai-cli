@@ -4,7 +4,14 @@
 
 # ai-cli
 
-Minimal CLI to stream LLM responses via [OpenRouter](https://openrouter.ai) with interactive conversation mode, file attachments, syntax-highlighted markdown, code extraction, and inline image display.
+Minimal CLI to stream LLM responses via [OpenRouter](https://openrouter.ai).
+
+- 💬 **Interactive conversation mode** — follow-up naturally, context preserved
+- 📎 **File attachments** — drag & drop images or code files right into the terminal
+- ✨ **Syntax-highlighted markdown** — beautiful streaming output
+- 🧩 **Code extraction** — pull code blocks straight to files
+- 🎨 **Image generation & display** — inline images in iTerm2
+- 🔄 **Conversation continuity** — pick up where you left off with `--continue`
 
 ## Setup
 
