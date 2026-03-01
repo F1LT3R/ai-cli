@@ -1,11 +1,9 @@
-// Validation Mode — Iteration 2
-// Characterization test: ensure CLI entrypoint wiring remains consistent (no runtime exec)
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const file = resolve(process.cwd(), 'bin/ai-i22.mjs')
+const file = resolve(process.cwd(), 'bin/ai.mjs')
 
 test('cli file exists and has shebang', async () => {
 	const src = await readFile(file, 'utf8')

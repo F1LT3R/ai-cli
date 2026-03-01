@@ -1,10 +1,10 @@
 {
 	"name": "ai-cli",
 	"version": "0.1.0",
-	"description": "Minimal CLI to stream ChatGPT responses to stdout and save final output to file.",
+	"description": "Minimal CLI to stream LLM responses via OpenRouter with interactive conversation mode.",
 	"type": "module",
 	"bin": {
-		"ai": "./bin/ai-i22.mjs"
+		"ai": "./bin/ai.mjs"
 	},
 	"keywords": [
 		"chatgpt",

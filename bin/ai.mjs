@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// This is iteration 22 of bin/ai-i21.mjs (pass effectiveFormat into streamCompletion)
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -7,9 +6,9 @@ import process from 'node:process'
 import * as readline from 'node:readline/promises'
 import readline_raw from 'node:readline'
 import { stdin as rlIn, stderr as rlErr } from 'node:process'
-import { MarkdownRenderer } from '../lib/markdown-renderer-i5.mjs'
-import { parseOptions } from '../lib/options-i3.mjs'
-import { shapeRequestBody } from '../lib/response-shape-i2.mjs'
+import { MarkdownRenderer } from '../lib/markdown-renderer.mjs'
+import { parseOptions } from '../lib/options.mjs'
+import { shapeRequestBody } from '../lib/response-shape.mjs'
 
 const SGR = {
 	reset: '\x1b[0m',
