@@ -29,7 +29,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```
-ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--init]
+ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--update-pricing] [--init]
 ```
 
 ### Examples
@@ -70,6 +70,7 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `--max` | Remove max_tokens cap, use model's full output limit |
 | `--debug` | Print raw request/response JSON to stderr |
 | `--init` | Create a local `.ai/config.json` in the current directory, inheriting from parent |
+| `--update-pricing` | Fetch latest model pricing from OpenRouter and cache locally |
 
 ### Models
 
@@ -87,7 +88,6 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `llama8b` | meta-llama/llama-3.1-8b | Meta Llama 3.1 8B (tiny) |
 | `qwen7b` | qwen/qwen-2.5-7b-instruct | Qwen 2.5 7B (tiny) |
 | `qwenvl` | qwen/qwen-2.5-vl-7b-instruct | Qwen 2.5 VL 7B (vision, charts) |
-| `phi` | microsoft/phi-3.5-mini-128k-instruct | Microsoft Phi 3.5 Mini (tiny) |
 | `mistral` | mistralai/mistral-small-3.2 | Mistral Small 3.2 |
 | `deepseek` | deepseek/deepseek-v3.2 | DeepSeek V3.2 |
 | `kimi` | moonshotai/kimi-k2.5 | Moonshot Kimi K2.5 |
@@ -117,12 +117,30 @@ Attachments are stored in the conversation, so `--continue` re-reads the origina
 
 Use `--model image` to generate images. In iTerm2, images display inline. In other terminals, images are saved to disk as PNG files.
 
+### Cost tracking
+
+After each response, a status line shows context usage, tokens, and cost:
+
+```
+Context: ⢀ 0% | Tokens: 150↑/800↓ | Cost: $0.0004q/$0.0004s/$0.0004t
+```
+
+- **Context**: braille fill meter showing context window usage
+- **Tokens**: green input↑ / red output↓
+- **Cost**: query (`q`), session (`s`), and total conversation (`t`)
+
+On quit, a session summary is displayed. When using `--continue`, the conversation total includes cost from prior sessions.
+
+Pricing data is cached locally in `lib/pricing.json` from OpenRouter's model list. The cache is auto-fetched when running `--models` if missing or stale (>7 days). Run `--update-pricing` to refresh manually. If no local pricing is available, the cost field falls back to OpenRouter's `usage.cost` from the API response.
+
 ## Project structure
 
 ```
 bin/ai.mjs                         CLI entrypoint
 lib/markdown-renderer.mjs          Streaming markdown renderer with syntax highlighting
 lib/options.mjs                    CLI flag parser
+lib/pricing.mjs                    Pricing fetch, cache, lookup, cost calculation
+lib/pricing.json                   Cached model pricing data from OpenRouter
 lib/response-shape.mjs             Request body shaping (JSON format, etc.)
 lib/validators.mjs                 Output validators by format
 ```
@@ -140,7 +158,7 @@ Use `ai --init` to create a local config in any subdirectory. It inherits settin
 ## Tests
 
 ```sh
-node --test bin/ai.test.mjs lib/options.test.mjs lib/markdown-renderer.snap.test.mjs lib/markdown-renderer.output.test.mjs lib/validators.test.mjs
+node --test bin/ai.test.mjs lib/options.test.mjs lib/markdown-renderer.snap.test.mjs lib/markdown-renderer.output.test.mjs lib/validators.test.mjs lib/pricing.test.mjs
 ```
 
 ## License
