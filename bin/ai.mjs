@@ -30,6 +30,9 @@ const MODELS = [
 	{ alias: 'llama', id: 'meta-llama/llama-3.3-70b-instruct', description: 'Meta Llama 3.3 70B' },
 	{ alias: 'mistral', id: 'mistralai/mistral-small-3.2-24b-instruct-2506', description: 'Mistral Small 3.2' },
 	{ alias: 'deepseek', id: 'deepseek/deepseek-v3.2-20251201', description: 'DeepSeek V3.2' },
+	{ alias: 'kimi', id: 'moonshotai/kimi-k2.5', description: 'Moonshot Kimi K2.5' },
+	{ alias: 'grok', id: 'x-ai/grok-4', description: 'xAI Grok 4 (thinking)' },
+	{ alias: 'grokcode', id: 'x-ai/grok-code-fast-1', description: 'xAI Grok Code Fast' },
 	{ alias: 'image', id: 'google/gemini-2.5-flash-image', description: 'Nano Banana — image gen', image: true },
 ]
 
@@ -62,6 +65,7 @@ export const parseArgs = (argv) => {
 		continueConv: false,
 		codeOnly: false,
 		debug: false,
+		init: false,
 	}
 
 	const args = argv.slice(2)
@@ -104,6 +108,10 @@ export const parseArgs = (argv) => {
 			opts.debug = true
 			continue
 		}
+		if (arg === '--init') {
+			opts.init = true
+			continue
+		}
 	}
 
 	return opts
@@ -130,7 +138,14 @@ const fileExists = async (p) => {
 }
 
 const findProjectRoot = async (startDir) => {
-	let dir = path.resolve(startDir)
+	const cwd = path.resolve(startDir)
+	// Check current directory for .ai/config.json first
+	const localCfg = path.join(cwd, '.ai', 'config.json')
+	if (await fileExists(localCfg)) {
+		return cwd
+	}
+	// Walk up to nearest package.json
+	let dir = cwd
 	while (true) {
 		const pkg = path.join(dir, 'package.json')
 		if (await fileExists(pkg)) {
@@ -142,8 +157,32 @@ const findProjectRoot = async (startDir) => {
 		}
 		dir = parent
 	}
-	// Fallback: use current working directory if no package.json found
-	return path.resolve(startDir)
+	// Fallback: use current working directory
+	return cwd
+}
+
+const findParentConfig = async (startDir) => {
+	let dir = path.resolve(startDir)
+	// Skip current directory — we want the parent
+	dir = path.dirname(dir)
+	while (true) {
+		const cfg = path.join(dir, '.ai', 'config.json')
+		if (await fileExists(cfg)) {
+			return cfg
+		}
+		const pkg = path.join(dir, 'package.json')
+		if (await fileExists(pkg)) {
+			const pkgCfg = path.join(dir, '.ai', 'config.json')
+			// Found a project root — return its config path (may not exist yet)
+			return await fileExists(pkgCfg) ? pkgCfg : null
+		}
+		const parent = path.dirname(dir)
+		if (parent === dir) {
+			break
+		}
+		dir = parent
+	}
+	return null
 }
 
 const defaultConfig = () => ({
@@ -606,6 +645,32 @@ const main = async () => {
 	try {
 		const opts = parseArgs(process.argv)
 
+		// --init: create a local .ai/config.json inheriting from parent
+		if (opts.init) {
+			const cwd = path.resolve(process.cwd())
+			const localCfgPath = path.join(cwd, '.ai', 'config.json')
+			if (await fileExists(localCfgPath)) {
+				process.stderr.write(`${SGR.yellow}[Already exists: ${SGR.reset}${localCfgPath}${SGR.yellow}]${SGR.reset}\n`)
+				process.exit(0)
+				return
+			}
+			const parentCfgPath = await findParentConfig(cwd)
+			let cfg
+			if (parentCfgPath) {
+				cfg = await readConfig(parentCfgPath)
+				cfg.conversation = []
+				cfg.meta = { ...cfg.meta, total_turns: 0, last_updated: null }
+				process.stderr.write(`${SGR.dim}[Inherited from: ${parentCfgPath}]${SGR.reset}\n`)
+			} else {
+				cfg = defaultConfig()
+			}
+			await fs.mkdir(path.join(cwd, '.ai'), { recursive: true })
+			await fs.writeFile(localCfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+			process.stderr.write(`${SGR.green}[Created: ${SGR.reset}${localCfgPath}${SGR.green}]${SGR.reset}\n`)
+			process.exit(0)
+			return
+		}
+
 		const root = await findProjectRoot(process.cwd())
 		const cfgPath = await ensureConfig(root)
 		let cfg = await readConfig(cfgPath)
@@ -641,7 +706,7 @@ const main = async () => {
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code]')
+			console.error('Usage: ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--init]')
 			process.exit(1)
 			return
 		}

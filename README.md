@@ -18,7 +18,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```
-ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--debug]
+ai "<prompt>" [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--debug] [--init]
 ```
 
 ### Examples
@@ -55,6 +55,7 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `--code` | Extract code blocks on save (suggests `code.js`, etc.) |
 | `--json` | Request JSON output format |
 | `--debug` | Print raw request/response JSON to stderr |
+| `--init` | Create a local `.ai/config.json` in the current directory, inheriting from parent |
 
 ### Models
 
@@ -68,6 +69,9 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | `llama` | meta-llama/llama-3.3-70b | Meta Llama 3.3 70B |
 | `mistral` | mistralai/mistral-small-3.2 | Mistral Small 3.2 |
 | `deepseek` | deepseek/deepseek-v3.2 | DeepSeek V3.2 |
+| `kimi` | moonshotai/kimi-k2.5 | Moonshot Kimi K2.5 |
+| `grok` | x-ai/grok-4 | xAI Grok 4 (thinking) |
+| `grokcode` | x-ai/grok-code-fast-1 | xAI Grok Code Fast |
 | `image` | google/gemini-2.5-flash-image | Image generation (Nano Banana) |
 
 You can also pass any full OpenRouter model ID directly: `--model anthropic/claude-sonnet-4`
@@ -88,7 +92,13 @@ lib/validators.mjs                 Output validators by format
 
 ## Config
 
-On first run, a `.ai/config.json` file is created in the nearest directory containing a `package.json`. It stores model settings and conversation history for `--continue`.
+Config is resolved in this order:
+
+1. `.ai/config.json` in the current directory (if it exists)
+2. Walk up to the nearest `package.json` and use its `.ai/config.json`
+3. Fall back to current directory
+
+Use `ai --init` to create a local config in any subdirectory. It inherits settings (model, system prompt, API key) from the nearest parent config but starts with a fresh conversation.
 
 ## Tests
 
