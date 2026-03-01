@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo2.png" alt="ai-cli logo" width="128">
+  <img src="logo2.png" alt="ai-cli logo" width="256">
 </p>
 
 # ai-cli
