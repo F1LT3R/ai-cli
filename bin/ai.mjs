@@ -136,6 +136,10 @@ export const parseArgs = (argv) => {
 			opts.maxTokens = true
 			continue
 		}
+		if (arg === '--size' || arg === '--ratio') {
+			i += 1
+			continue
+		}
 		if (arg === '--debug') {
 			opts.debug = true
 			continue
@@ -536,7 +540,7 @@ const buildMessages = async ({ system, conversation, prompt, attachments }) => {
 	return msgs
 }
 
-const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effectiveFormat) => {
+const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments, imageConfig }, effectiveFormat) => {
 	const resolvedModel = resolveModel(opts.model) ?? cfg.model
 	const modelEntry = MODELS.find((m) => m.id === resolvedModel)
 	const isImageModel = Boolean(modelEntry?.image)
@@ -556,6 +560,9 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments }, effe
 
 	if (isImageModel) {
 		body.modalities = ['image', 'text']
+		if (imageConfig) {
+			body.image_config = imageConfig
+		}
 	}
 
 	const shaped = shapeRequestBody({ format: effectiveFormat, body })
@@ -1027,6 +1034,10 @@ const main = async () => {
 				opts,
 				prompt,
 				attachments: currentAttachments,
+				imageConfig: (__normalized.size || __normalized.ratio) ? {
+					...(__normalized.size ? { image_size: __normalized.size } : {}),
+					...(__normalized.ratio ? { aspect_ratio: __normalized.ratio } : {}),
+				} : null,
 			}, effectiveFormat)
 
 			lastFinalText = finalText

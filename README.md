@@ -29,7 +29,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```
-ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--update-pricing] [--init]
+ai "<prompt>" [file ...] [--model id] [--size tier] [--ratio W:H] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--update-pricing] [--init]
 ```
 
 ### Examples
@@ -39,6 +39,8 @@ ai "explain closures in javascript" --model flash
 ai "write a node http server" --code --model nano
 ai "list 5 fruits" --json
 ai "draw a banana" --model image
+ai "draw a banana" --model image --ratio 16:9
+ai "draw a banana" --model image --size 4K --ratio 16:9
 ai "describe this" photo.png                  # attach an image
 ai "review these" src/app.js src/utils.js     # attach text files
 ai --continue "now make it yellow"            # resume prior conversation
@@ -61,6 +63,8 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | Flag | Description |
 |---|---|
 | `--model <alias\|id>` | Choose a model by alias or full OpenRouter ID |
+| `--size <tier>` | Image resolution: `1K` (default), `2K`, `4K` |
+| `--ratio <W:H>` | Image aspect ratio: `1:1`, `16:9`, `4:3`, `3:2`, etc. |
 | `--system <text>` | Override the system prompt |
 | `--no-stream` | Wait for full response instead of streaming |
 | `--models` | List available model aliases |
@@ -115,7 +119,7 @@ Attachments are stored in the conversation, so `--continue` re-reads the origina
 
 ### Image generation
 
-Use `--model image` to generate images. In iTerm2, images display inline. In other terminals, images are saved to disk as PNG files.
+Use `--model image` to generate images. Use `--ratio` for aspect ratio and `--size` for resolution tier — they can be combined (e.g. `--size 4K --ratio 16:9`). Supported ratios: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`. Supported tiers: `1K` (default), `2K`, `4K`. In iTerm2, images display inline. In other terminals, images are saved to disk as PNG files.
 
 ### Cost tracking
 
