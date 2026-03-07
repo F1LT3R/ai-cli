@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
+import { execSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import * as readline from 'node:readline/promises'
@@ -137,6 +140,18 @@ export const parseArgs = (argv) => {
 			continue
 		}
 		if (arg === '--size' || arg === '--ratio') {
+			i += 1
+			continue
+		}
+		if (arg === '--no-inline') {
+			continue
+		}
+		if (arg === '--out') {
+			const next = args[i + 1]
+			if (next && !next.startsWith('--')) i += 1
+			continue
+		}
+		if (arg === '--prefix') {
 			i += 1
 			continue
 		}
@@ -540,7 +555,7 @@ const buildMessages = async ({ system, conversation, prompt, attachments }) => {
 	return msgs
 }
 
-const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments, imageConfig }, effectiveFormat) => {
+const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments, imageConfig, noInline }, effectiveFormat) => {
 	const resolvedModel = resolveModel(opts.model) ?? cfg.model
 	const modelEntry = MODELS.find((m) => m.id === resolvedModel)
 	const isImageModel = Boolean(modelEntry?.image)
@@ -640,8 +655,8 @@ const streamCompletion = async ({ apiKey, cfg, opts, prompt, attachments, imageC
 		if (!m) continue
 		const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
 		const b64 = m[2]
-		if (isITerm2()) {
-			displayITermImage(b64, `image.${ext}`)
+		if (!noInline && supportsInlineImages()) {
+			displayInlineImage(b64, `image.${ext}`)
 		} else {
 			const imgPath = assertInsideCwd(path.resolve(process.cwd(), `image-${Date.now()}.${ext}`))
 			await fs.writeFile(imgPath, Buffer.from(b64, 'base64'))
@@ -677,6 +692,19 @@ const promptSavePath = async ({ proposed }) => {
 		try { await rl.close() } catch {}
 		process.removeListener('SIGINT', onSigint)
 		return null
+	}
+}
+
+const findFreePath = async (filePath) => {
+	if (!(await fileExists(filePath))) return filePath
+	const dir = path.dirname(filePath)
+	const ext = path.extname(filePath)
+	const base = path.basename(filePath, ext)
+	let n = 1
+	while (true) {
+		const candidate = path.join(dir, `${base}-${n}${ext}`)
+		if (!(await fileExists(candidate))) return candidate
+		n += 1
 	}
 }
 
@@ -860,11 +888,54 @@ const formatTranscript = (conversation) => {
 	return parts.join('\n\n')
 }
 
-const isITerm2 = () => process.env.TERM_PROGRAM === 'iTerm.app'
+const isTmux = () => Boolean(process.env.TMUX)
 
-const displayITermImage = (base64Data, filename = 'image.png') => {
+
+const supportsInlineImages = () => {
+	const tp = process.env.TERM_PROGRAM || ''
+	if (tp === 'iTerm.app') return true
+	// Inside tmux, TERM_PROGRAM is overwritten to 'tmux'.
+	// iTerm2 leaks ITERM_SESSION_ID into child environments.
+	if (process.env.ITERM_SESSION_ID) return true
+	return false
+}
+
+const displayInlineImage = (base64Data, filename = 'image.png') => {
+	let b64 = base64Data
+	if (isTmux()) {
+		// tmux passthrough has a size limit for large images.
+		// Downscale to a thumbnail for inline display.
+		try {
+			const tmp = fsSync.mkdtempSync(path.join(tmpdir(), 'ai-'))
+			const full = path.join(tmp, 'full.png')
+			const thumb = path.join(tmp, 'thumb.png')
+			fsSync.writeFileSync(full, Buffer.from(base64Data, 'base64'))
+			execSync(
+				`sips -Z 800 "${full}" --out "${thumb}"`,
+				{ stdio: 'pipe', timeout: 5000 },
+			)
+			b64 = fsSync.readFileSync(thumb).toString('base64')
+			try { fsSync.unlinkSync(full) } catch {}
+			try { fsSync.unlinkSync(thumb) } catch {}
+			try { fsSync.rmdirSync(tmp) } catch {}
+		} catch {
+			// If thumbnail fails, try with original data
+		}
+	}
 	const name64 = Buffer.from(filename).toString('base64')
-	process.stdout.write(`\x1b]1337;File=name=${name64};inline=1:${base64Data}\x07\n`)
+	const size = Math.ceil(b64.length * 3 / 4)
+	const params = `name=${name64};size=${size};inline=1`
+	if (isTmux()) {
+		fsSync.writeSync(1,
+			`\x1bPtmux;\x1b\x1b]1337;File=${params}:` +
+			b64 +
+			`\x07\x1b\\\n`
+		)
+	} else {
+		process.stdout.write(
+			`\x1b]1337;File=${params}:${base64Data}\x07\n`
+		)
+	}
 }
 
 const main = async () => {
@@ -988,7 +1059,7 @@ const main = async () => {
 		}
 
 		if (!prompt) {
-			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--max] [--update-pricing] [--init]')
+			console.error('Usage: ai "<prompt>" [file ...] [--model id] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--out [path]] [--prefix str] [--size tier] [--ratio W:H] [--debug] [--update-pricing] [--init]')
 			process.exit(1)
 			return
 		}
@@ -1038,6 +1109,7 @@ const main = async () => {
 					...(__normalized.size ? { image_size: __normalized.size } : {}),
 					...(__normalized.ratio ? { aspect_ratio: __normalized.ratio } : {}),
 				} : null,
+				noInline: __normalized.noInline,
 			}, effectiveFormat)
 
 			lastFinalText = finalText
@@ -1097,6 +1169,68 @@ const main = async () => {
 			cfg.meta = cfg.meta || {}
 			cfg.meta.total_turns = Number(cfg.meta.total_turns || 0) + 1
 			cfg.meta.last_updated = isoNow()
+
+			// --out: auto-save and exit (no interactive prompt)
+			if (__normalized.out) {
+				const explicitPath = typeof __normalized.out === 'string' ? __normalized.out : null
+				const prefix = __normalized.prefix || ''
+
+				if (lastImages.length > 0) {
+					for (let idx = 0; idx < lastImages.length; idx++) {
+						const dataUrl = lastImages[idx]
+						const m = dataUrl.match(/^data:image\/([\w+]+);base64,(.+)$/)
+						if (!m) continue
+						const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+						const b64 = m[2]
+						let saveName
+						if (explicitPath) {
+							saveName = lastImages.length > 1
+								? `${explicitPath.replace(/\.[^.]+$/, '')}-${idx + 1}${path.extname(explicitPath) || `.${ext}`}`
+								: explicitPath
+						} else {
+							saveName = lastImages.length > 1
+								? `${prefix}image-${idx + 1}.${ext}`
+								: `${prefix}image.${ext}`
+						}
+						const rawPath = assertInsideCwd(path.resolve(process.cwd(), saveName))
+						const targetPath = await findFreePath(rawPath)
+						await ensureParentDir(targetPath)
+						await fs.writeFile(targetPath, Buffer.from(b64, 'base64'))
+						process.stderr.write(`${SGR.green}[Saved: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+					}
+				} else if (opts.codeOnly || __normalized.codeOnly) {
+					const blocks = extractCode(lastFinalText)
+					if (blocks.length > 0) {
+						for (const block of blocks) {
+							const ext = langToExt(block.lang)
+							const saveName = explicitPath || `${prefix}code${ext}`
+							const rawPath = assertInsideCwd(path.resolve(process.cwd(), saveName))
+							const targetPath = await findFreePath(rawPath)
+							await ensureParentDir(targetPath)
+							await fs.writeFile(targetPath, block.code + '\n', 'utf8')
+							process.stderr.write(`${SGR.green}[Saved: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+						}
+					} else {
+						const saveName = explicitPath || `${prefix}conv-${cfg.meta.total_turns}.md`
+						const rawPath = assertInsideCwd(path.resolve(process.cwd(), saveName))
+						const targetPath = await findFreePath(rawPath)
+						await ensureParentDir(targetPath)
+						await fs.writeFile(targetPath, lastFinalText + '\n', 'utf8')
+						process.stderr.write(`${SGR.green}[Saved: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+					}
+				} else {
+					const ext = (effectiveFormat === 'json') ? '.json' : '.md'
+					const saveName = explicitPath || `${prefix}conv-${cfg.meta.total_turns}${ext}`
+					const rawPath = assertInsideCwd(path.resolve(process.cwd(), saveName))
+					const targetPath = await findFreePath(rawPath)
+					await ensureParentDir(targetPath)
+					await fs.writeFile(targetPath, lastFinalText + '\n', 'utf8')
+					process.stderr.write(`${SGR.green}[Saved: ${SGR.reset}${targetPath}${SGR.green}]${SGR.reset}\n`)
+				}
+
+				await writeConfigAtomic(cfgPath, cfg)
+				break
+			}
 
 			// Non-TTY: auto-save response to default path and exit
 			if (!process.stdin.isTTY) {

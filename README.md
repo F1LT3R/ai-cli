@@ -29,7 +29,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 ## Usage
 
 ```
-ai "<prompt>" [file ...] [--model id] [--size tier] [--ratio W:H] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--update-pricing] [--init]
+ai "<prompt>" [file ...] [--model id] [--out [path]] [--prefix str] [--size tier] [--ratio W:H] [--system text] [--no-stream] [--models] [--continue] [--code] [--json] [--max] [--debug] [--update-pricing] [--init]
 ```
 
 ### Examples
@@ -41,6 +41,9 @@ ai "list 5 fruits" --json
 ai "draw a banana" --model image
 ai "draw a banana" --model image --ratio 16:9
 ai "draw a banana" --model image --size 4K --ratio 16:9
+ai "write a node http server" --code --out    # saves to code.js
+ai "draw a logo" --model image --out logo.png # saves image to logo.png
+ai "list 5 fruits" --json --out --prefix my-  # saves to my-conv-1.json
 ai "describe this" photo.png                  # attach an image
 ai "review these" src/app.js src/utils.js     # attach text files
 ai --continue "now make it yellow"            # resume prior conversation
@@ -63,8 +66,11 @@ When piped (non-TTY), the response is auto-saved without prompting.
 | Flag | Description |
 |---|---|
 | `--model <alias\|id>` | Choose a model by alias or full OpenRouter ID |
+| `--out [path]` | Save to file and exit — auto-names by content type if no path given. Never overwrites; increments filename. |
+| `--prefix <str>` | Prepend string to auto-generated filenames (use with `--out`) |
 | `--size <tier>` | Image resolution: `1K` (default), `2K`, `4K` |
 | `--ratio <W:H>` | Image aspect ratio: `1:1`, `16:9`, `4:3`, `3:2`, etc. |
+| `--no-inline` | Save images to disk instead of displaying inline |
 | `--system <text>` | Override the system prompt |
 | `--no-stream` | Wait for full response instead of streaming |
 | `--models` | List available model aliases |
@@ -119,7 +125,17 @@ Attachments are stored in the conversation, so `--continue` re-reads the origina
 
 ### Image generation
 
-Use `--model image` to generate images. Use `--ratio` for aspect ratio and `--size` for resolution tier — they can be combined (e.g. `--size 4K --ratio 16:9`). Supported ratios: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`. Supported tiers: `1K` (default), `2K`, `4K`. In iTerm2, images display inline. In other terminals, images are saved to disk as PNG files.
+Use `--model image` to generate images. Use `--ratio` for aspect ratio and `--size` for resolution tier — they can be combined (e.g. `--size 4K --ratio 16:9`). Supported ratios: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`. Supported tiers: `1K` (default), `2K`, `4K`.
+
+Images display inline in iTerm2 (including inside tmux with `allow-passthrough on`). In tmux, large images are automatically thumbnailed to fit tmux's passthrough buffer — the inline display is a preview that disappears on window redraw. Use `--out` to save the full-resolution file. In other terminals, images are saved to disk as PNG files. Use `--no-inline` to always save to disk instead of displaying inline.
+
+**tmux setup** for inline images:
+```
+# ~/.tmux.conf
+set -g allow-passthrough all
+```
+
+Files are never overwritten — if `image.png` exists, the next save writes `image-1.png`.
 
 ### Cost tracking
 
